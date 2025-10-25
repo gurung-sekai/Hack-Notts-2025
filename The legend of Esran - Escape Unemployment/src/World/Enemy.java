@@ -4,7 +4,7 @@ import Battle.Stats;
 
 public class Enemy {
 
-    private double x y;
+    private double x, y;
     private double speed;
     private Stats stats;
 

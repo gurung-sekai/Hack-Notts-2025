@@ -16,7 +16,7 @@ public class Player {
     }
 
     public Player(double x, double y){
-        this(x, y, 1.0, new Stats())
+        this(x, y, 1.0, new Stats());
     }
 
     public double getX() { return x; }

@@ -12,11 +12,18 @@ public class Technique {
     public final Tag tag;   //Charge, Interrupt, guard, break, none
 
     // effect hook which applies statuses, heals, or more
-    public final BiConsumer <Fighter, Fighter> onHit;
+    // public final BiConsumer <Fighter, Fighter> onHit;
 
-    public Technique(String name, Affinity affinity, int power,
-                     ) {
-        
+    public Technique(String name, Affinity affinity, int power, String name1, Affinity affinity1, int power1, int priority, int momentumDelta, int cooldown, Tag tag) {
+
+        this.name = name1;
+        this.affinity = affinity1;
+        this.power = power1;
+        this.priority = priority;
+        this.momentumDelta = momentumDelta;
+        this.cooldown = cooldown;
+        this.tag = tag;
+        // this.onHit = onHit;
     }
 
 
