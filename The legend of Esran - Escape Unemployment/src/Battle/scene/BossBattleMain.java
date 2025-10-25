@@ -1,4 +1,4 @@
-package battle.scene;
+package Battle.scene;
 
 import javax.swing.*;
 

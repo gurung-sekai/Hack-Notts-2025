@@ -4,7 +4,7 @@ import fx.FXLibrary;
 import fx.FxManager;
 import gfx.AnimatedSprite;
 import gfx.SpriteFactory;
-import world.gfx.Tilesheet;
+import World.gfx.Tilesheet;
 
 import javax.swing.*;
 import java.awt.*;
