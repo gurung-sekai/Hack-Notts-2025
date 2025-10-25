@@ -1,4 +1,4 @@
-package reasources;
+package resources;
 
 public class empty {
 }
