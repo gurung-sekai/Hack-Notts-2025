@@ -15,10 +15,19 @@ public class Technique {
     public final BiConsumer <Fighter, Fighter> onHit;
 
     public Technique(String name, Affinity affinity, int power,
-                     ) {
-        
+         int accuracy, int priority, int momentumDelta,
+         int cooldown, Tag tag, BiConsumer<Fighter, Fighter> onHit) {
+        this.name = name; this.affinity = affinity;
+        this.power = power; this.accuracy = accuracy;
+        this.priority = priority; this.momentumDelta = momentumDelta;
+        this.cooldown = cooldown; this.tag = tag;
+        this.onHit;
+
     }
 
+    public boolean isUtility() {
+        return power <= 0 && affinity == null;
+    }
 
 
 }
