@@ -1,4 +1,4 @@
-package Battle;
+package Battle.domain;
 
 public class AffinityChart {
     public static double mult(Affinity atk, Affinity def) {

@@ -1,12 +1,12 @@
-package Battle;
+package Battle.domain;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
 
 public class Fighter {
     public final String name;
-    public final int Affinity aura; //aspect (Ember/Verdent/Stone/Storm)
+    public final Affinity aura; //aspect (Ember/Verdent/Stone/Storm)
     public final Stats base;
-    public final Teqnique[] techs = new Teqnique[4];
 
     public int hp;
     public Status status = Status.OK;
@@ -17,7 +17,9 @@ public class Fighter {
     public Technique charging = null;
 
     public Fighter(String name, Affinity aura, Stats stats) {
-        this.name = name; this.aura = aura; this.base = stats.copy();
+        this.name = name;
+        this.aura = aura;
+        this.base = stats.copy();
         this.hp = stats.hp;
 
     }

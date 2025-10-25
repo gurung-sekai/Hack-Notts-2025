@@ -1,4 +1,4 @@
-package Battle;
+package Battle.domain;
 
 public enum Status {
     // THis will be the status of the character or opponent

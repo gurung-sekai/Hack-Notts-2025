@@ -1,6 +1,6 @@
-package Battle;
+package Battle.domain;
 
 public enum Tag {
     // NONE, CHARGE, INTERRUPT, GUARD, BREAK
-    OK, CHARGE, INTERRUPT, GUARD, BREAK
+    NONE, CHARGE, INTERRUPT, GUARD, BREAK
 }

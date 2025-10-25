@@ -1,4 +1,6 @@
-package Battle;
+package Battle.core;
+import Battle.domain.*;
+import Battle.util.Rng;
 
 import java.util.ArrayList;
 import java.util.Scanner;

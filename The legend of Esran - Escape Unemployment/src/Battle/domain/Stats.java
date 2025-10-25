@@ -1,4 +1,4 @@
-package Battle;
+package Battle.domain;
 
 public class Stats {
     public int hp, power, guard, speed;

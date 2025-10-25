@@ -1,4 +1,4 @@
-package Battle;
+package Battle.domain;
 
 public enum Affinity {
     // This will be the type of opponent you have
