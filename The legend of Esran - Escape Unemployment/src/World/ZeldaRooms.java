@@ -1,5 +1,7 @@
 package World;
 
+import Battle.domain.Fighter;
+
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
@@ -68,6 +70,26 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     private Room room;                 // current room
     private Rectangle player;          // player rectangle in pixels
     private boolean up, down, left, right;
+
+    // Somewhere in ZeldaRooms when you detect a boss tile or key press:
+    private void startBossBattle() {
+        Fighter hero = new Fighter("King's Guardian", Battle.domain.Affinity.STONE, new Battle.domain.Stats(120,18,18,14));
+        Fighter boss = new Fighter("Arch Druid", Battle.domain.Affinity.VERDANT, new Battle.domain.Stats(140,22,16,14));
+
+        JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(this);
+        Battle.swing.BattlePanel bp = new Battle.swing.BattlePanel(hero, boss, winner -> {
+            // After battle ends, restore the world scene
+            frame.setContentPane(this);
+            this.requestFocusInWindow();
+            frame.revalidate();
+            // Use 'winner' if you want to drop loot, open door, etc.
+        });
+
+        frame.setContentPane(bp);
+        frame.revalidate();
+        bp.requestFocusInWindow();
+    }
+
 
     public ZeldaRooms() {
         setPreferredSize(new java.awt.Dimension(COLS * TILE, ROWS * TILE));
