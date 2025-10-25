@@ -1,5 +1,6 @@
 package World;
 
+import Battle.scene.BossBattlePanel;
 import World.gfx.DungeonTextures;
 
 import javax.swing.JFrame;
@@ -373,6 +374,23 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             if (en.kind==Kind.BOSS && en.hitbox().intersects(player)) {
                 battleMode = true;
                 toast("BATTLE START!", true); toastTimer = 99999;
+                SwingUtilities.invokeLater(() -> {
+                    JFrame f = new JFrame("Boss Battle");
+                    f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+                    BossBattlePanel panel = BossBattlePanel.create(
+                            BossBattlePanel.BossKind.OGRE_WARLORD,
+                            () -> {
+                                System.out.println("Battle ended (win or game over) — return to world here.");
+                                f.dispose();
+                            });
+
+                    f.setContentPane(panel);
+                    f.pack();
+                    f.setLocationRelativeTo(null);
+                    f.setVisible(true);
+                    panel.requestFocusInWindow();
+                });
             }
 
             if (invuln==0 && en.kind!=Kind.BOSS && en.hitbox().intersects(player)) damagePlayer(1);
