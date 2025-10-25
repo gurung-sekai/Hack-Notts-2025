@@ -1,4 +1,4 @@
-package battle;
+package Battle;
 
 public class SimpleAi {
     public static Technique choose(Fighter me, Fighter opp, int momentum) {

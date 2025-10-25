@@ -1,4 +1,4 @@
-package battle;
+package Battle;
 
 public class BaseMoves {
     // 4 techniques for all of the characters

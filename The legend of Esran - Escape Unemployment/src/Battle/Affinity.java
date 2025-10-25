@@ -1,7 +1,8 @@
 package Battle;
 
-public class Affinity {
+public enum Affinity {
     // This will be the type of opponent you have
     // Ember, Verdant, Stone, Storm
+    EMBER, VERDANT, STONE, STORM
 
 }
