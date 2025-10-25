@@ -4,6 +4,7 @@ import Battle.core.*;
 import Battle.domain.*;
 import Battle.util.Rng;
 
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
@@ -175,10 +176,10 @@ public class BattlePanel extends JPanel {
 
         gg.setFont(getFont().deriveFont(Font.BOLD, 16f));
         String[] names = {
-                Battle.domain.BaseMoves.MOVES[0].name,
-                Battle.domain.BaseMoves.MOVES[1].name,
-                Battle.domain.BaseMoves.MOVES[2].name,
-                Battle.domain.BaseMoves.MOVES[3].name
+                BaseMoves.MOVES[0].name,
+                BaseMoves.MOVES[1].name,
+                BaseMoves.MOVES[2].name,
+                BaseMoves.MOVES[3].name
         };
         for (int i=0;i<4;i++) {
             int cx = x + 20 + (i%2)*160;
