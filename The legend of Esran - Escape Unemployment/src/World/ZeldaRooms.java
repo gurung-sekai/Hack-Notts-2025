@@ -1,3 +1,7 @@
+package World;
+
+import World.gfx.DungeonTextures;
+
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
@@ -41,16 +45,15 @@ import java.util.Set;
 
 /**
  * Zelda-like rooms (no assets required)
- * Requested mechanics kept:
+ * Mechanics kept:
  *  - Boss contact -> freeze into "BATTLE" placeholder
  *  - Left-click sweeping sword attack
  *  - Anti-stuck stepped movement + unstick on spawn/teleport
  *  - Game Over overlay; restart on Space/Left-Click; safe respawn
- * Adjusted in this revision:
- *  - Boss after 4 doors
- *  - Fixed key (and other) drops on enemy death
- *  - Bow/arrows robust: arrows hit enemies and cause drops
- *  - Slower enemies and slower enemy fireballs
+ *  - Boss after a few doors; bow/arrows; pickups
+ * Textures:
+ *  - Uses World.gfx.DungeonTextures (autoDetect) for optional sprites.
+ *  - If no textures found, draws flat colors like before.
  */
 public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, MouseListener {
 
@@ -59,12 +62,8 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
     static final int PLAYER_SIZE = (int)(TILE * 0.6), PLAYER_SPEED = 4, MAX_HP = 5;
     static final Color BG = new Color(6, 24, 32);
 
-    // Optional tilesheet (ignored if not found)
-    static final String TILESET_PATH = "/dungeon_sheet.png";
-    static final Rectangle FLOOR_SRC = new Rectangle(224, 64, 32, 32);
-    static final Rectangle WALL_SRC  = new Rectangle(  0,  0, 32, 32);
-    private boolean useSprites = false;
-    private BufferedImage tilesheet, floorSprite, wallSprite;
+    // Optional textures loader (replaces the old tilesheet code)
+    private DungeonTextures textures;
 
     enum T { VOID, FLOOR, WALL, DOOR, STAIR }
     enum Dir { N, S, W, E }
@@ -181,28 +180,14 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             @Override public void mouseDragged(MouseEvent e){ mouseX=e.getX(); mouseY=e.getY(); }
         });
 
-        loadTilesIfAny();
+        // New: try to load textures (falls back to flat colors if not found)
+        textures = DungeonTextures.autoDetect();
+
         room = makeOrGetRoom(worldPos, null, false);
         discovered.add(worldPos);
         placePlayerAtCenter();
         unstickPlayer(); // safe initial spawn
         timer.start();
-    }
-
-    // ---- tilesheet (optional) ----
-    private void loadTilesIfAny(){
-        try {
-            var in = ZeldaRooms.class.getResourceAsStream(TILESET_PATH);
-            if (in==null) { useSprites=false; return; }
-            tilesheet = ImageIO.read(in);
-            floorSprite = cut(tilesheet, FLOOR_SRC);
-            wallSprite  = cut(tilesheet, WALL_SRC);
-            useSprites=true;
-        } catch(Exception e){ useSprites=false; }
-    }
-    private static BufferedImage cut(BufferedImage src, Rectangle r){
-        int w=Math.min(r.width,src.getWidth()-r.x), h=Math.min(r.height,src.getHeight()-r.y);
-        return src.getSubimage(r.x,r.y,Math.max(1,w),Math.max(1,h));
     }
 
     // ---- world / rooms ----
@@ -341,11 +326,9 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
     @Override public void actionPerformed(ActionEvent e){ if(!showMap) updateGame(); repaint(); }
 
     private void updateGame(){
-        // Freeze states
         if (gameOver)   { return; }
         if (battleMode) { return; }
 
-        // DIAGONAL MOVEMENT (normalized) + anti-stuck stepped movement
         int dx = (left?-PLAYER_SPEED:0) + (right?PLAYER_SPEED:0);
         int dy = (up?-PLAYER_SPEED:0) + (down?PLAYER_SPEED:0);
         if (dx!=0 && dy!=0){ dx = Math.round(dx*0.70710678f); dy = Math.round(dy*0.70710678f); }
@@ -355,45 +338,38 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
 
         float pcx=player.x+player.width/2f, pcy=player.y+player.height/2f;
 
-        // enemies: chase + wind-up + shoot (slower fireballs)
         for (Enemy en: room.enemies){
             if (!en.alive) continue;
 
             float ddx=pcx-en.x, ddy=pcy-en.y, len=(float)Math.hypot(ddx,ddy);
             if (len>0.001f){
                 float nx=ddx/len, ny=ddy/len;
-
-                // reduced chase multipliers
                 float baseChase = (en.kind==Kind.SNAIL?0.45f:0.70f);
                 float windupSlow = (en.windup>0 ? 0.6f : 1.0f);
                 float chase = baseChase * windupSlow;
-
-                // boss moves a bit slower than before
                 if (en.kind == Kind.BOSS) chase = 0.95f;
-
                 en.vx=en.speed*nx*chase; en.vy=en.speed*ny*chase;
             }
 
-            // Ranged attack logic for non-boss
             if (en.canShoot){
                 if (en.shootCd>0) en.shootCd--;
                 else if (en.windup==0) {
-                    en.windup = 18; // telegraph
+                    en.windup = 18;
                 } else {
                     en.windup--;
                     if (en.windup==0){
-                        float sp=2.0f; // SLOWER FIREBALL
+                        float sp=2.0f;
                         float vx=(len==0?0:sp*ddx/Math.max(1e-4f,len));
                         float vy=(len==0?0:sp*ddy/Math.max(1e-4f,len));
                         room.projectiles.add(new Projectile(ProjType.ENEMY_FIRE,en.x,en.y,vx,vy));
-                        en.shootCd = 32 + rng.nextInt(18); // 32–49
+                        en.shootCd = 32 + rng.nextInt(18);
                     }
                 }
             }
 
             moveEnemyStepped(en, Math.round(en.vx), Math.round(en.vy));
 
-            // Boss contact => battle freeze
+            // Boss contact => freeze world into placeholder overlay
             if (en.kind==Kind.BOSS && en.hitbox().intersects(player)) {
                 battleMode = true;
                 toast("BATTLE START!", true); toastTimer = 99999;
@@ -402,10 +378,8 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             if (invuln==0 && en.kind!=Kind.BOSS && en.hitbox().intersects(player)) damagePlayer(1);
         }
 
-        // ---- Sweeping sword update/hits ----
         updateSwordSweep();
 
-        // projectiles
         List<Projectile> remove=new ArrayList<>();
         for (Projectile p: room.projectiles){
             p.x+=p.vx; p.y+=p.vy; p.life--;
@@ -413,20 +387,15 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             if (p.life<=0 || hitWall(hb)) { remove.add(p); continue; }
             if (p.type==ProjType.ENEMY_FIRE){
                 if (invuln==0 && hb.intersects(player)){ damagePlayer(1); remove.add(p); }
-            } else { // PLAYER_ARROW -> robust enemy hits + drops
+            } else {
                 for (Enemy en: room.enemies){
                     if (!en.alive || en.kind==Kind.BOSS) continue;
-                    if (hb.intersects(en.hitbox())){
-                        handleEnemyDeath(en);
-                        remove.add(p);
-                        break;
-                    }
+                    if (hb.intersects(en.hitbox())){ handleEnemyDeath(en); remove.add(p); break; }
                 }
             }
         }
         room.projectiles.removeAll(remove);
 
-        // pickups
         for (KeyItem k: room.keys){
             if (k.taken) continue;
             Rectangle kr=new Rectangle(k.x*TILE+TILE/4, k.y*TILE+TILE/4, TILE/2, TILE/2);
@@ -443,7 +412,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             if (ar.intersects(player)){ a.taken=true; arrowsInv+=a.count; toast("Picked "+a.count+" arrows (Total: "+arrowsInv+")", false); }
         }
 
-        // stairs
         if (room.stairTile!=null){
             Rectangle sr=new Rectangle(room.stairTile.x*TILE, room.stairTile.y*TILE, TILE, TILE);
             if (sr.intersects(player)){
@@ -454,7 +422,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             }
         }
 
-        // doors
         Dir through=touchingDoorOnEdge();
         if (through!=null){
             if (room.locked.contains(through)){
@@ -465,12 +432,10 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             boolean heavy=(room.mobDoor==through);
             switchRoom(through, heavy);
 
-            // track progression; queue boss after 4 doors
             doorsPassed++;
             if (doorsPassed>=4 && !bossSpawned) bossQueued = true;
         }
 
-        // death -> GAME OVER; wait for user to restart
         if (hp<=0){
             swingActive=false;
             room.projectiles.clear();
@@ -484,7 +449,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
 
     private void handleEnemyDeath(Enemy en){
         en.alive=false;
-        // Drop chances tuned to feel rewarding
         if (rng.nextFloat()<0.22f) room.keys.add(spawnKeyOnFloor(room));
         if (!hasBow && rng.nextFloat()<0.10f) room.bows.add(spawnBowOnFloor(room));
         if (rng.nextFloat()<0.40f) room.arrows.add(spawnArrowBundleOnFloor(room, 3 + rng.nextInt(4)));
@@ -501,7 +465,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
         return false;
     }
 
-    // Player stepped movement to avoid sticking in corners
     private void moveStepped(int dx, int dy){
         int steps = Math.max(Math.abs(dx), Math.abs(dy));
         if (steps == 0) return;
@@ -675,14 +638,34 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
 
         for(int x=0;x<COLS;x++) for(int y=0;y<ROWS;y++){
             int px=x*TILE, py=y*TILE; T t=room.g[x][y];
-            switch(t){
-                case FLOOR -> { gg.setColor(new Color(18,64,78)); gg.fillRect(px,py,TILE,TILE); gg.setColor(new Color(10,45,55)); gg.drawRect(px,py,TILE,TILE); }
-                case WALL  -> { gg.setColor(new Color(36,132,156)); gg.fillRect(px,py,TILE,TILE); }
-                case DOOR  -> { gg.setColor(new Color(18,64,78)); gg.fillRect(px,py,TILE,TILE); gg.setColor(new Color(220,172,60));
-                    if (x==0||x==COLS-1) gg.fillRect(px+(x==0?0:TILE-6), py+6, 6, TILE-12);
-                    if (y==0||y==ROWS-1) gg.fillRect(px+6, py+(y==0?0:TILE-6), TILE-12, 6); }
-                case STAIR -> { gg.setColor(new Color(25,80,25)); gg.fillRect(px,py,TILE,TILE); gg.setColor(new Color(50,180,50)); gg.drawRect(px,py,TILE,TILE); }
-                default -> {}
+
+            if (textures != null && textures.isReady()){
+                switch(t){
+                    case FLOOR -> gg.drawImage(textures.floor(), px, py, TILE, TILE, null);
+                    case WALL  -> gg.drawImage(textures.wall(),  px, py, TILE, TILE, null);
+                    case DOOR  -> {
+                        gg.drawImage(textures.floor(), px, py, TILE, TILE, null);
+                        gg.setColor(new Color(220,172,60));
+                        if (x==0||x==COLS-1) gg.fillRect(px+(x==0?0:TILE-6), py+6, 6, TILE-12);
+                        if (y==0||y==ROWS-1) gg.fillRect(px+6, py+(y==0?0:TILE-6), TILE-12, 6);
+                    }
+                    case STAIR -> {
+                        gg.drawImage(textures.floor(), px, py, TILE, TILE, null);
+                        gg.setColor(new Color(50,180,50)); gg.drawRect(px,py,TILE,TILE);
+                    }
+                    default -> {}
+                }
+            } else {
+                // Fallback: original flat-color tiles
+                switch(t){
+                    case FLOOR -> { gg.setColor(new Color(18,64,78)); gg.fillRect(px,py,TILE,TILE); gg.setColor(new Color(10,45,55)); gg.drawRect(px,py,TILE,TILE); }
+                    case WALL  -> { gg.setColor(new Color(36,132,156)); gg.fillRect(px,py,TILE,TILE); }
+                    case DOOR  -> { gg.setColor(new Color(18,64,78)); gg.fillRect(px,py,TILE,TILE); gg.setColor(new Color(220,172,60));
+                        if (x==0||x==COLS-1) gg.fillRect(px+(x==0?0:TILE-6), py+6, 6, TILE-12);
+                        if (y==0||y==ROWS-1) gg.fillRect(px+6, py+(y==0?0:TILE-6), TILE-12, 6); }
+                    case STAIR -> { gg.setColor(new Color(25,80,25)); gg.fillRect(px,py,TILE,TILE); gg.setColor(new Color(50,180,50)); gg.drawRect(px,py,TILE,TILE); }
+                    default -> {}
+                }
             }
         }
 
@@ -720,7 +703,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
                 switch(en.kind){ case SLIME -> gg.setColor(new Color(255,140,0));
                     case RUNNER -> gg.setColor(new Color(255,70,70));
                     case SNAIL -> gg.setColor(new Color(255,200,120));
-                    default -> gg.setColor(Color.PINK);}
+                    default -> gg.setColor(Color.PINK); }
                 gg.fillOval(hb.x,hb.y,hb.width,hb.height);
                 gg.setColor(Color.BLACK); gg.drawOval(hb.x,hb.y,hb.width,hb.height);
                 if (en.windup>0){
@@ -770,7 +753,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
             gg.setComposite(old);
         }
 
-        // BATTLE overlay
+        // BATTLE overlay (placeholder freeze)
         if (battleMode){
             gg.setColor(new Color(0,0,0,150));
             gg.fillRect(0,0,getWidth(),getHeight());
@@ -879,7 +862,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
 
     // ---- input ----
     @Override public void keyPressed(KeyEvent e){
-        // If GAME OVER, only Space restarts
         if (gameOver){
             if (e.getKeyCode()==KeyEvent.VK_SPACE){
                 resetGame();
@@ -919,7 +901,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener, M
     }
     @Override public void keyTyped(KeyEvent e){}
 
-    // Mouse: left-click triggers the sweeping sword or restarts if GAME OVER
     @Override public void mousePressed(MouseEvent e){
         if (gameOver){
             if (e.getButton()==MouseEvent.BUTTON1) resetGame();

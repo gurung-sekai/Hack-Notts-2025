@@ -1,10 +1,10 @@
-package battle.scene;
+package Battle.scene;
 
 import fx.FXLibrary;
 import fx.FxManager;
 import gfx.AnimatedSprite;
 import gfx.SpriteFactory;
-import World.gfx.Tilesheet;
+import gfx.Tilesheet;
 
 import javax.swing.*;
 import java.awt.*;
@@ -12,23 +12,13 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Turn-based boss battle scene (original, non-derivative style).
- * - uses your existing sprites, FX, UI border, font, tiles
- * - no Run option; loss -> Game Over, then callback
- * - hero drawn in back-facing style (mirrored & lowered)
- * - arena prefers "Set 1.png" tiles; falls back to atlas_floor
- *
- * Hook from world:
- *   var panel = BossBattlePanel.create(BossKind.OGRE_WARLORD, () -> { /* return to world */ });
-        *   frame.setContentPane(panel); frame.revalidate(); panel.requestFocusInWindow();
- */
 public class BossBattlePanel extends JPanel {
 
-    // -------- choose a boss --------
     public enum BossKind { BIG_ZOMBIE, OGRE_WARLORD, SKELETON_LORD, PUMPKIN_KING, IMP_OVERLORD, WIZARD_ARCHON }
 
     public static BossBattlePanel create(BossKind kind, Runnable onEnd){
@@ -52,7 +42,6 @@ public class BossBattlePanel extends JPanel {
         return new BossBattlePanel(hero, boss, onEnd);
     }
 
-    // -------- fighter view (lightweight) --------
     public static class FighterView {
         public final String name, affinity;
         public int hp, hpMax;
@@ -64,7 +53,6 @@ public class BossBattlePanel extends JPanel {
         }
     }
 
-    // -------- state machine --------
     private enum Phase { PLAYER_SELECT, PLAYER_ANIM, ENEMY_ANIM, WIN, LOSE, GAME_OVER }
     private Phase phase = Phase.PLAYER_SELECT;
 
@@ -76,8 +64,10 @@ public class BossBattlePanel extends JPanel {
     private long lastNs=0;
     private double shake=0, shakeTime=0;
 
-    // arena tiles: prefer Set 1.png; else atlas_floor
-    private Tilesheet arenaSheet;
+    // arena tiles
+    private final Tilesheet arenaSheetPrimary;
+    private final Tilesheet arenaSheetFallback;
+    private final boolean usePrimary;
     private final int TILE = 32;
     private final int ARENA_W_TILES = 22, ARENA_H_TILES = 10;
 
@@ -89,7 +79,6 @@ public class BossBattlePanel extends JPanel {
     private final String[] cmds = {"Fight", "Guard", "Item"};
     private int cmdIndex = 0;
 
-    // damage floaters
     private static class Dmg {
         double x,y,t,life=0.9; String text; Color col;
         void upd(double dt){ t+=dt; }
@@ -114,26 +103,29 @@ public class BossBattlePanel extends JPanel {
         setPreferredSize(new Dimension(800, 480));
         setBackground(Color.BLACK);
 
-        // tilesheet: try Set 1.png, fallback to floor atlas
-        try {
-            arenaSheet = new Tilesheet("/resources/tiles/Set 1.png", 16, 16);
-        } catch (Throwable t) {
-            arenaSheet = new Tilesheet("/resources/tiles/atlas_floor-16x16.png", 16, 16);
-        }
+        // tilesheets (robust)
+        Tilesheet prim = null;
+        boolean ok = true;
+        try { prim = new Tilesheet("/tiles/Set 1.png", 16, 16); }
+        catch (Throwable t) { ok = false; }
+        arenaSheetPrimary = prim;
 
-        // UI border (your exact file name)
-        BufferedImage borders = NineSlice.loadWhole("/resources/UI/Pxiel Art UI borders.png");
+        Tilesheet fb = null;
+        try { fb = new Tilesheet("/tiles/atlas_floor-16x16.png", 16, 16); }
+        catch (Throwable t) {
+            try { fb = new Tilesheet("/resources/tiles/atlas_floor-16x16.png", 16, 16); }
+            catch (Throwable ignored) { }
+        }
+        arenaSheetFallback = (fb != null ? fb : prim);
+        usePrimary = ok && prim != null;
+
+        // UI border (robust)
+        BufferedImage borders = NineSlice.loadWhole("/UI/Pixel Art UI borders.png");
         panel = new NineSlice(borders, 6);
 
-        // font
-        Font pf;
-        try{
-            pf = Font.createFont(Font.TRUETYPE_FONT,
-                    BossBattlePanel.class.getResourceAsStream("/resources/fonts/ThaleahFat.ttf"));
-            GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(pf);
-        }catch(Exception e){
-            pf = new Font("Monospaced", Font.BOLD, 12);
-        }
+        // font (manual close, no try-with-resources on reassigned var)
+        Font pf = tryLoadFont("/fonts/ThaleahFat.ttf");
+        if (pf == null) pf = new Font("Monospaced", Font.BOLD, 12);
         pixel14 = pf.deriveFont(Font.PLAIN, 14f);
         pixel18 = pf.deriveFont(Font.PLAIN, 18f);
 
@@ -148,17 +140,36 @@ public class BossBattlePanel extends JPanel {
                         case KeyEvent.VK_ENTER, KeyEvent.VK_SPACE -> chooseCommand();
                     }
                 } else if (phase == Phase.GAME_OVER) {
-                    // any key after game over -> callback
                     if (onEnd != null) onEnd.run();
                 }
             }
         });
 
-        // loop
-        new Timer(1000/60, e -> tick()).start();
+        // Explicit Swing Timer class to avoid ambiguity with java.util.Timer
+        new javax.swing.Timer(1000/60, e -> tick()).start();
     }
 
-    // ---------- update ----------
+    private static Font tryLoadFont(String path){
+        InputStream in = null;
+        try {
+            in = BossBattlePanel.class.getResourceAsStream(path);
+            if (in == null) {
+                ClassLoader cl = Thread.currentThread().getContextClassLoader();
+                if (cl != null) in = cl.getResourceAsStream(path.startsWith("/") ? path.substring(1) : path);
+            }
+            if (in == null) return null;
+            Font f = Font.createFont(Font.TRUETYPE_FONT, in);
+            GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(f);
+            return f;
+        } catch (Exception e){
+            return null;
+        } finally {
+            if (in != null) {
+                try { in.close(); } catch (IOException ignored) {}
+            }
+        }
+    }
+
     private void tick(){
         long now = System.nanoTime();
         if (lastNs == 0) lastNs = now;
@@ -173,7 +184,6 @@ public class BossBattlePanel extends JPanel {
         repaint();
     }
 
-    // ---------- actions ----------
     private void chooseCommand(){
         switch (cmdIndex){
             case 0 -> playerAttack();
@@ -185,13 +195,11 @@ public class BossBattlePanel extends JPanel {
     private void playerAttack(){
         phase = Phase.PLAYER_ANIM;
         double bx = getWidth() - 240, by = 180;
-        // pick an FX based on boss affinity vibe
         fx.add(FXLibrary.thunderStrike(bx, by));
         int dmg = 18 + (int)(Math.random()*10);
         boss.hp = Math.max(0, boss.hp - dmg);
         dmgs.add(newDmg(bx+24, by-12,  String.valueOf(dmg), new Color(0xE4504D)));
         shakeTime = 0.20;
-
         new javax.swing.Timer(420, e -> enemyTurn()).start();
     }
 
@@ -238,7 +246,6 @@ public class BossBattlePanel extends JPanel {
 
     private void endBattle(boolean playerWon){
         if (playerWon) {
-            // brief banner then return to world
             new javax.swing.Timer(600, e -> { if (onEnd != null) onEnd.run(); }).start();
         } else {
             gameOver();
@@ -247,12 +254,10 @@ public class BossBattlePanel extends JPanel {
 
     private void gameOver(){
         phase = Phase.GAME_OVER;
-        // wait for any key; onKey handler will call onEnd()
     }
 
     private static Dmg newDmg(double x,double y,String s,Color c){ Dmg d=new Dmg(); d.x=x; d.y=y; d.text=s; d.col=c; return d; }
 
-    // ---------- paint ----------
     @Override protected void paintComponent(Graphics g0){
         super.paintComponent(g0);
         Graphics2D g = (Graphics2D) g0;
@@ -265,16 +270,13 @@ public class BossBattlePanel extends JPanel {
 
         drawArena(g);
 
-        // hero (back-ish): mirror horizontally and place lower
         drawSpriteMirrored(g, hero.sprite.frame(), 140, 230, hero.sprite.w(), hero.sprite.h(), true);
 
-        // boss (front)
-        var bf = boss.sprite.frame();
+        Image bf = boss.sprite.frame();
         if (bf != null) g.drawImage(bf, getWidth()-260, 120, boss.sprite.w(), boss.sprite.h(), null);
 
         drawHUD(g);
 
-        // damage numbers last
         for (var d : dmgs) d.draw(g, pixel18);
 
         if (phase == Phase.GAME_OVER) drawGameOver(g);
@@ -283,21 +285,29 @@ public class BossBattlePanel extends JPanel {
     private void drawArena(Graphics2D g){
         int W = getWidth(), H = getHeight();
 
-        // subdued sky
         var grad = new GradientPaint(0,0,new Color(18,22,28), 0,H/2,new Color(14,18,22));
         Paint old = g.getPaint(); g.setPaint(grad); g.fillRect(0,0,W,H); g.setPaint(old);
 
-        // tiled band of ground with Set / floor atlas
-        int startY = H - ARENA_H_TILES*TILE + 28;
-        for (int y=0;y<ARENA_H_TILES;y++){
-            for (int x=0;x<ARENA_W_TILES;x++){
-                int idx = Math.floorMod((x*73856093 ^ y*19349663), Math.max(1, arenaSheet.cols*arenaSheet.rows));
-                int c = idx % arenaSheet.cols, r = idx / arenaSheet.cols;
-                arenaSheet.draw(g, c, r, x*TILE, startY + y*TILE, TILE);
+        Tilesheet ts = (usePrimary && arenaSheetPrimary != null) ? arenaSheetPrimary : arenaSheetFallback;
+        if (ts != null) {
+            int startY = H - ARENA_H_TILES*TILE + 28;
+            for (int y=0;y<ARENA_H_TILES;y++){
+                for (int x=0;x<ARENA_W_TILES;x++){
+                    int idx = Math.floorMod((x*73856093 ^ y*19349663), Math.max(1, ts.cols*ts.rows));
+                    int c = idx % ts.cols, r = idx / ts.cols;
+                    ts.draw(g, c, r, x*TILE, startY + y*TILE, TILE);
+                }
+            }
+        } else {
+            int startY = H - ARENA_H_TILES*TILE + 28;
+            for (int y=0;y<ARENA_H_TILES;y++){
+                for (int x=0;x<ARENA_W_TILES;x++){
+                    g.setColor(((x+y)&1)==0 ? new Color(32,36,44) : new Color(28,30,38));
+                    g.fillRect(x*TILE, startY + y*TILE, TILE, TILE);
+                }
             }
         }
 
-        // vignette
         Composite prev = g.getComposite();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f));
         g.setColor(Color.BLACK); g.fillRect(0,0,W,24);
@@ -308,19 +318,16 @@ public class BossBattlePanel extends JPanel {
     private void drawHUD(Graphics2D g){
         int W = getWidth(), H = getHeight();
 
-        // player info bottom-left
         int infoW = 300, infoH = 80, pad = 16;
         panel.draw(g, pad, H - infoH - pad, infoW, infoH);
         g.setFont(pixel14);
         label(g, hero.name, pad+20, H - infoH - pad + 24);
         label(g, "HP: "+hero.hp+"/"+hero.hpMax, pad+20, H - infoH - pad + 44);
 
-        // boss info top-right
         panel.draw(g, W - infoW - pad, pad, infoW, infoH);
         label(g, boss.name, W - infoW - pad + 20, pad + 24);
         label(g, "HP: "+boss.hp+"/"+boss.hpMax, W - infoW - pad + 20, pad + 44);
 
-        // command box bottom-right
         int cmdW = 420, cmdH = 110;
         panel.draw(g, W - cmdW - pad, H - cmdH - pad, cmdW, cmdH);
         g.setFont(pixel18);

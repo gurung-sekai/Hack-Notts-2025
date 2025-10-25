@@ -1,19 +1,69 @@
-package battle.scene;
+package Battle.scene;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
 
 public class NineSlice {
     private final BufferedImage lt,t,rt,l,c,r,lb,b,rb;
     private final int e;
 
-    public static BufferedImage loadWhole(String path){
-        try { return ImageIO.read(NineSlice.class.getResource(path)); }
-        catch(Exception e){ throw new RuntimeException("Missing UI borders: "+path, e); }
+    /** Try to load a UI borders image from a few likely places; fallback to a generated skin. */
+    public static BufferedImage loadWhole(String preferredPath){
+        BufferedImage img = tryLoad(preferredPath);
+        if (img == null) {
+            // Common alternatives (fix possible "Pixel" vs "Pxiel", with/without /resources)
+            String[] candidates = {
+                    "/UI/Pixel Art UI borders.png",
+                    "/UI/Pxiel Art UI borders.png",
+                    "/resources/UI/Pixel Art UI borders.png",
+                    "/resources/UI/Pxiel Art UI borders.png"
+            };
+            for (String p : candidates) {
+                img = tryLoad(p);
+                if (img != null) break;
+            }
+        }
+        if (img == null) {
+            img = generateDefaultSkin(24, 24);
+        }
+        return img;
     }
 
-    /** Build 9-slice from a full image; edge is corner thickness in px. */
+    private static BufferedImage tryLoad(String path){
+        if (path == null) return null;
+        InputStream in = null;
+        try {
+            in = NineSlice.class.getResourceAsStream(path);
+            if (in == null) {
+                ClassLoader cl = Thread.currentThread().getContextClassLoader();
+                if (cl != null) {
+                    in = cl.getResourceAsStream(path.startsWith("/") ? path.substring(1) : path);
+                }
+            }
+            if (in == null) return null;
+            return ImageIO.read(in);
+        } catch (IOException ignored) {
+            return null;
+        } finally {
+            if (in != null) {
+                try { in.close(); } catch (IOException ignored) {}
+            }
+        }
+    }
+
+    private static BufferedImage generateDefaultSkin(int w, int h){
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setColor(new Color(28, 32, 38)); g.fillRect(0,0,w,h);
+        g.setColor(new Color(46, 54, 66)); g.fillRect(2,2,w-4,h-4);
+        g.setColor(new Color(240, 220, 120)); g.drawRect(1,1,w-3,h-3);
+        g.dispose();
+        return img;
+    }
+
     public NineSlice(BufferedImage img, int edge){
         int W = img.getWidth(), H = img.getHeight();
         int E = Math.min(edge, Math.min(W,H)/2);
