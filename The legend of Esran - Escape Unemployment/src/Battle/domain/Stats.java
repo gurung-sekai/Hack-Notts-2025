@@ -2,7 +2,7 @@ package Battle.domain;
 
 public class Stats {
 
-    private int hp, power, guard, speed;
+    public int hp, power, guard, speed;
 
     public Stats(int hp, int power, int guard, int speed) {
         this.hp = hp;
