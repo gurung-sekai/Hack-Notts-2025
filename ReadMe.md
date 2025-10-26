@@ -4,7 +4,7 @@
 
 ### In our team we have Pritam, Esran, Jaleel, and Ola
 
-# 🗡️ The Legend of Aetheria
+# The Legend of Aetheria
 
 > A procedurally generated Java dungeon crawler inspired by retro classics — built entirely from scratch.
 
@@ -13,7 +13,7 @@
 
 ---
 
-## 🧭 Overview
+## Overview
 
 **The Legend of Aetheria** is a 2D dungeon crawler built entirely in **pure Java**, without any engines or frameworks.  
 Each dungeon is procedurally generated with randomized obstacles, enemy placements, and door configurations — creating a fresh experience every time.  
@@ -22,7 +22,7 @@ The player explores interconnected rooms, fights monsters, collects bows, keys, 
 
 ---
 
-## ⚙️ Architecture Overview
+## Architecture Overview
 
 | File | Description |
 |------|--------------|
