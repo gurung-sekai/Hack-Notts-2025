@@ -27,14 +27,12 @@ import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionAdapter;
 
 import java.awt.geom.GeneralPath;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.IOException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,6 +75,8 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         int x, y;
         int size = (int)(TILE * 0.6);
         int cd = 0;
+        boolean alive = true;
+        EnemySpawn spawn;
     }
 
     static class Bullet {
@@ -98,6 +98,11 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         int r = 12;
     }
 
+    static class EnemySpawn {
+        int x, y;
+        boolean defeated = false;
+    }
+
     static class BossEncounter {
         BossBattlePanel.BossKind kind;
         boolean defeated = false;
@@ -109,9 +114,10 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         Set<Dir> doors = EnumSet.noneOf(Dir.class);
         List<Enemy> enemies = new ArrayList<>();
         List<KeyPickup> keyPickups = new ArrayList<>();
+        List<EnemySpawn> enemySpawns = new ArrayList<>();
         EnumSet<Dir> lockedDoors = EnumSet.noneOf(Dir.class);
         boolean cleared = false;
-        boolean keyDropped = false;
+        boolean spawnsPrepared = false;
         Room() {
             for (int x = 0; x < COLS; x++)
                 for (int y = 0; y < ROWS; y++)
@@ -228,25 +234,46 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     }
 
     private void spawnEnemiesIfNeeded(Point pos, Room r) {
-        if (r == null || !r.enemies.isEmpty() || r.cleared) return;
+        if (r == null || r.cleared) return;
         if (isBossRoom(pos)) return;
-        int count = 4 + rng.nextInt(4);
-        for (int i = 0; i < count; i++) {
-            int tries = 0;
-            while (tries++ < 50) {
-                int tx = 2 + rng.nextInt(COLS - 4);
-                int ty = 2 + rng.nextInt(ROWS - 4);
-                if (r.g[tx][ty] != T.FLOOR) continue;
-                int px = tx * TILE + TILE/2;
-                int py = ty * TILE + TILE/2;
-                if (!isRectFree(r, px, py, (int)(TILE*0.3))) continue;
-                if (player != null && (Math.abs(px - (player.x+player.width/2)) + Math.abs(py - (player.y+player.height/2)) < TILE*4)) continue;
-                Enemy e = new Enemy();
-                e.x = px; e.y = py; e.cd = rng.nextInt(30);
-                r.enemies.add(e);
-                break;
-            }
+        if (!r.spawnsPrepared) {
+            initializeEnemySpawns(r);
         }
+        if (!r.enemies.isEmpty()) return;
+
+        for (EnemySpawn spawn : r.enemySpawns) {
+            if (spawn.defeated) continue;
+            Enemy e = new Enemy();
+            e.x = spawn.x;
+            e.y = spawn.y;
+            e.cd = rng.nextInt(30);
+            e.spawn = spawn;
+            r.enemies.add(e);
+        }
+    }
+
+    private void initializeEnemySpawns(Room r) {
+        if (r == null || r.spawnsPrepared) return;
+        int count = 4 + rng.nextInt(4);
+        int attempts = 0;
+        while (r.enemySpawns.size() < count && attempts++ < count * 40) {
+            int tx = 2 + rng.nextInt(COLS - 4);
+            int ty = 2 + rng.nextInt(ROWS - 4);
+            if (r.g[tx][ty] != T.FLOOR) continue;
+            int px = tx * TILE + TILE / 2;
+            int py = ty * TILE + TILE / 2;
+            if (!isRectFree(r, px, py, (int) (TILE * 0.3))) continue;
+            if (player != null) {
+                int pcx = player.x + player.width / 2;
+                int pcy = player.y + player.height / 2;
+                if (Math.abs(px - pcx) + Math.abs(py - pcy) < TILE * 4) continue;
+            }
+            EnemySpawn spawn = new EnemySpawn();
+            spawn.x = px;
+            spawn.y = py;
+            r.enemySpawns.add(spawn);
+        }
+        r.spawnsPrepared = true;
     }
 
     private boolean isBossRoom(Point pos) {
@@ -269,12 +296,13 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
 
     private void updateCombat() {
         if (room == null) return;
-        dropKeyIfEligible(room);
+        updateRoomClearState(room);
 
         int pcx = player.x + player.width/2;
         int pcy = player.y + player.height/2;
 
         for (Enemy e : room.enemies) {
+            if (!e.alive) continue;
             int dx = pcx - e.x;
             int dy = pcy - e.y;
             double len = Math.hypot(dx, dy);
@@ -333,42 +361,55 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             // enemy collision (circle vs enemy AABB simplified)
             for (Enemy e : room.enemies) {
                 if (!b.alive) break;
+                if (!e.alive) continue;
                 int ex0 = e.x - e.size/2, ey0 = e.y - e.size/2;
                 int ex1 = ex0 + e.size, ey1 = ey0 + e.size;
                 if (b.x >= ex0 && b.x <= ex1 && b.y >= ey0 && b.y <= ey1) {
                     b.alive = false; explosions.add(makeExplosion(b.x, b.y));
-                    // remove enemy on hit
-                    e.size = 0; // mark for removal
+                    eliminateEnemy(room, e);
                 }
             }
         }
         playerBullets.removeIf(bb -> !bb.alive);
-        room.enemies.removeIf(e -> e.size <= 0);
-        dropKeyIfEligible(room);
+        room.enemies.removeIf(e -> !e.alive);
+        updateRoomClearState(room);
 
         // explosions advance
         for (Explosion ex : explosions) ex.age++;
         explosions.removeIf(ex -> ex.age >= ex.life);
     }
 
-    private void dropKeyIfEligible(Room r) {
-        if (r == null) return;
-        if (!r.enemies.isEmpty()) return;
-        if (r.keyDropped) return;
-        if (isBossRoom(worldPos)) return;
-        r.cleared = true;
-        dropKey(r);
+    private void eliminateEnemy(Room r, Enemy enemy) {
+        if (enemy == null || !enemy.alive) return;
+        enemy.alive = false;
+        if (enemy.spawn != null) {
+            enemy.spawn.defeated = true;
+        }
+        spawnKeyPickup(r, enemy.x, enemy.y);
     }
 
-    private void dropKey(Room r) {
-        if (r == null || r.keyDropped) return;
+    private void spawnKeyPickup(Room r, int x, int y) {
+        if (r == null) return;
         KeyPickup key = new KeyPickup();
-        Point spot = safePlayerSpawn(r, COLS / 2 * TILE + TILE / 2, ROWS / 2 * TILE + TILE / 2);
-        key.x = spot.x;
-        key.y = spot.y;
+        key.x = x;
+        key.y = y;
         r.keyPickups.add(key);
-        r.keyDropped = true;
-        showMessage("A shimmering key drops to the ground!");
+        showMessage("An enemy dropped a key!");
+    }
+
+    private void updateRoomClearState(Room r) {
+        if (r == null || !r.spawnsPrepared || r.cleared) return;
+        boolean allDefeated = true;
+        for (EnemySpawn spawn : r.enemySpawns) {
+            if (!spawn.defeated) {
+                allDefeated = false;
+                break;
+            }
+        }
+        if (allDefeated) {
+            r.cleared = true;
+            showMessage("Room cleared! Gather the keys and move on.");
+        }
     }
 
     private void checkKeyPickup() {
@@ -384,8 +425,8 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             if (dx * dx + dy * dy <= maxR * maxR) {
                 it.remove();
                 keysHeld++;
-                room.cleared = true;
                 showMessage("You obtained a dungeon key! Keys: " + keysHeld);
+                updateRoomClearState(room);
             }
         }
     }
@@ -436,7 +477,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         targetRoom.enemies.clear();
         targetRoom.keyPickups.clear();
         targetRoom.cleared = true;
-        targetRoom.keyDropped = true;
     }
 
     private void grantBossReward(BossEncounter encounter) {
@@ -974,6 +1014,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
 
         // Enemies
         for (Enemy e : room.enemies) {
+            if (!e.alive) continue;
             if (enemyIdleFrames != null && enemyIdleFrames.length > 0) {
                 int idx = (animTick / 10) % enemyIdleFrames.length;
                 gg.drawImage(enemyIdleFrames[idx], e.x - e.size/2, e.y - e.size/2, e.size, e.size, null);

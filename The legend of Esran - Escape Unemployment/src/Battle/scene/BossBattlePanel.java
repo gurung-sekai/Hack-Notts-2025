@@ -8,19 +8,19 @@ import fx.Effect;
 import fx.FXLibrary;
 import gfx.AnimatedSprite;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+
+import util.ResourceLoader;
 
 /**
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
@@ -393,8 +393,8 @@ public class BossBattlePanel extends JPanel {
 
     private static BufferedImage loadImage(String path) {
         try {
-            return ImageIO.read(BossBattlePanel.class.getResource(path));
-        } catch (IOException | IllegalArgumentException e) {
+            return ResourceLoader.image(path);
+        } catch (Exception e) {
             throw new IllegalStateException("Failed to load image: " + path, e);
         }
     }
@@ -490,7 +490,7 @@ public class BossBattlePanel extends JPanel {
 
         static HeroDefinition defaultHero() {
             return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(160, 24, 16, 14),
-                    "/resources/sprites/Knight/knight_m_idle_anim_f");
+                    "/resources/sprites/Knight/Idle/knight_m_idle_anim_f");
         }
     }
 

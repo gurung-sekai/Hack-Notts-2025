@@ -1,7 +1,11 @@
 package fx;
 
+import util.ResourceLoader;
+
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
 
 /** Frame-by-frame animation helper (for VFX). */
 public class FrameAnim {
@@ -21,10 +25,16 @@ public class FrameAnim {
             BufferedImage[] arr = new BufferedImage[count];
             for (int k = 1; k <= count; k++) {
                 String num = (k < 10 && base.endsWith("_")) ? "0" + k : String.valueOf(k); // keep 01..08 format
-                arr[k - 1] = ImageIO.read(FrameAnim.class.getResource(base + num + ext));
+                String path = base + num + ext;
+                try (InputStream in = ResourceLoader.open(path)) {
+                    if (in == null) {
+                        throw new IOException("Missing frame: " + path);
+                    }
+                    arr[k - 1] = ImageIO.read(in);
+                }
             }
             return new FrameAnim(arr, fps, loop);
-        } catch (Exception e) {
+        } catch (IOException e) {
             throw new RuntimeException("FX seq load failed: " + base + "*", e);
         }
     }
