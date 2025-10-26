@@ -18,6 +18,7 @@ import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
+import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -375,16 +376,9 @@ public final class GameLauncher {
         panel.setMinimumSize(launchSettings.resolution());
         panel.setMaximumSize(launchSettings.resolution());
 
-        JPanel wrapper = new JPanel(new GridBagLayout());
+        JPanel wrapper = new JPanel(new BorderLayout());
         wrapper.setBackground(Color.BLACK);
-        GridBagConstraints gameConstraints = new GridBagConstraints();
-        gameConstraints.gridx = 0;
-        gameConstraints.gridy = 0;
-        gameConstraints.weightx = 1.0;
-        gameConstraints.weighty = 1.0;
-        gameConstraints.anchor = GridBagConstraints.CENTER;
-        gameConstraints.fill = GridBagConstraints.NONE;
-        wrapper.add(panel, gameConstraints);
+        wrapper.add(panel, BorderLayout.CENTER);
 
         currentGame = panel;
         gameWrapper = wrapper;
@@ -611,16 +605,9 @@ public final class GameLauncher {
             panel.setOpaque(true);
             panel.setBackground(Color.BLACK);
 
-            JPanel wrapper = new JPanel(new GridBagLayout());
+            JPanel wrapper = new JPanel(new BorderLayout());
             wrapper.setBackground(Color.BLACK);
-            GridBagConstraints bossConstraints = new GridBagConstraints();
-            bossConstraints.gridx = 0;
-            bossConstraints.gridy = 0;
-            bossConstraints.weightx = 1.0;
-            bossConstraints.weighty = 1.0;
-            bossConstraints.anchor = GridBagConstraints.CENTER;
-            bossConstraints.fill = GridBagConstraints.NONE;
-            wrapper.add(panel, bossConstraints);
+            wrapper.add(panel, BorderLayout.CENTER);
 
             if (bossWrapper != null) {
                 cardPanel.remove(bossWrapper);

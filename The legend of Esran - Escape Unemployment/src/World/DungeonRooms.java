@@ -250,7 +250,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         statusTicks = 0;
         inBoss = false;
         paused = false;
-        textures = DungeonTextures.procedural();
+        textures = DungeonTextures.load();
         playerIdleFrames = createIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
         enemyIdleFrames = createIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
         bossIdleFrames = createIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
@@ -263,7 +263,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void restoreFromSnapshot(DungeonRoomsSnapshot snapshot) {
-        textures = DungeonTextures.procedural();
+        textures = DungeonTextures.load();
         playerIdleFrames = createIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
         enemyIdleFrames = createIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
         bossIdleFrames = createIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
