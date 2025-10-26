@@ -1,6 +1,7 @@
 package gfx;
 
 import util.ResourceLoader;
+import util.SpriteSheetSlicer;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -51,6 +52,20 @@ public class AnimatedSprite {
         }
         if (!list.isEmpty()) {
             add(s, list.toArray(new BufferedImage[0]));
+        }
+    }
+
+    /** Slice an irregular sheet using {@link SpriteSheetSlicer}. */
+    public void addFromSheet(State state, String resourcePath) {
+        addFromSheet(state, resourcePath, SpriteSheetSlicer.Options.DEFAULT);
+    }
+
+    /** Slice an irregular sheet using {@link SpriteSheetSlicer}. */
+    public void addFromSheet(State state, String resourcePath, SpriteSheetSlicer.Options options) {
+        try {
+            add(state, SpriteSheetSlicer.slice(resourcePath, options));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to slice sprite sheet: " + resourcePath, e);
         }
     }
 

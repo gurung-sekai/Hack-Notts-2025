@@ -21,6 +21,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 import util.ResourceLoader;
+import util.SpriteSheetSlicer;
 
 /**
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
