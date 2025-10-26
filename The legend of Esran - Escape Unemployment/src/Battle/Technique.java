@@ -1,22 +1,38 @@
 package Battle;
 
 import java.util.function.BiConsumer;
+import Battle.domain.Affinity;
+import Battle.domain.Tag;
+import Battle.domain.Fighter;
 
 public class Technique {
-    public final String name;   //damage aspect or null for pure utility
-    public final Affinity affinity; // 0 for utility
-    public final int power; // 1-100
-    public final int priority;  // turn ordering base
-    public final int momentumDelta; //how much momentum moves on hit ( + towards player)
-    public final int cooldown;  //turns to refresh
-    public final Tag tag;   //Charge, Interrupt, guard, break, none
+    public final String name;  
+    public final Affinity affinity; 
+    public final int power; 
+    public final int priority;  
+    public final int momentumDelta; 
+    public final int cooldown;  
+    public final Tag tag;
 
     // effect hook which applies statuses, heals, or more
-    public final BiConsumer <Fighter, Fighter> onHit;
+    public final BiConsumer<Fighter, Fighter> onHit;
 
-    public Technique(String name, Affinity affinity, int power,
-                     ) {
-        
+    public Technique(String name,
+                     Affinity affinity,
+                     int power,
+                     int priority,
+                     int momentumDelta,
+                     int cooldown,
+                     Tag tag,
+                     BiConsumer<Fighter, Fighter> onHit) {
+        this.name = name;
+        this.affinity = affinity;
+        this.power = power;
+        this.priority = priority;
+        this.momentumDelta = momentumDelta;
+        this.cooldown = cooldown;
+        this.tag = tag;
+        this.onHit = onHit;
     }
 
 

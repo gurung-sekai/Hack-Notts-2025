@@ -1,141 +1,114 @@
 package World.gfx;
 
-import javax.imageio.ImageIO;
-import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
-import java.awt.image.RasterFormatException;
-import java.io.IOException;
-import java.io.InputStream;
+import javax.imageio.ImageIO;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 
-/**
- * Minimal texture helper for ZeldaRooms.
- * - Call DungeonTextures.autoDetect() to try several common resource paths.
- * - Or call DungeonTextures.from(path, floorRect, wallRect) to specify exactly.
- * If no textures load, isReady()==false and callers should draw fallback colors.
- */
 public final class DungeonTextures {
+    private boolean ready;
+    private BufferedImage floorSprite;
+    private BufferedImage wallSprite;
+    private BufferedImage[] floorCells; // loaded from folder if available
+    private BufferedImage[] wallCells;  // loaded from folder if available
+    private BufferedImage doorFloor;    // optional door floor tile if provided
 
-    // Defaults that match your original code
-    private static final String DEFAULT_PATH = "/dungeon_sheet.png";
-    private static final Rectangle DEFAULT_FLOOR_SRC = new Rectangle(224, 64, 32, 32);
-    private static final Rectangle DEFAULT_WALL_SRC  = new Rectangle(  0,  0, 32, 32);
+    private DungeonTextures() {}
 
-    private final boolean ready;
-    private final BufferedImage floorSprite;
-    private final BufferedImage wallSprite;
-
-    private DungeonTextures(boolean ready, BufferedImage floorSprite, BufferedImage wallSprite) {
-        this.ready = ready;
-        this.floorSprite = floorSprite;
-        this.wallSprite = wallSprite;
-    }
-
-    /** Try a few likely locations/atlases. */
     public static DungeonTextures autoDetect() {
-        // 1) Exact defaults (your original)
-        DungeonTextures dt = from(DEFAULT_PATH, DEFAULT_FLOOR_SRC, DEFAULT_WALL_SRC);
-        if (dt.isReady()) return dt;
+        DungeonTextures dt = new DungeonTextures();
+        // 1) Try folder-based variants first
+        dt.floorCells = loadFolderVariants("src/resources/tiles/floor", "floor_");
+        dt.wallCells  = loadFolderVariants("src/resources/tiles/wall",  "wall_");
+        dt.doorFloor  = tryReadFS("src/resources/tiles/floor/door_floor.png");
 
-        // 2) Same file under a tiles/ folder (common layout)
-        dt = from("/tiles/dungeon_sheet.png", DEFAULT_FLOOR_SRC, DEFAULT_WALL_SRC);
-        if (dt.isReady()) return dt;
-
-        // 3) Separate atlases (pick the first cell from each)
-        BufferedImage floorAtlas = loadImage("/tiles/atlas_floor-16x16.png");
-        BufferedImage wallAtlas16 = loadImage("/tiles/atlas_walls_low-16x16.png");
-        if (floorAtlas != null && wallAtlas16 != null) {
-            BufferedImage f = safeSub(floorAtlas, new Rectangle(0, 0,
-                    Math.min(16, floorAtlas.getWidth()), Math.min(16, floorAtlas.getHeight())));
-            BufferedImage w = safeSub(wallAtlas16, new Rectangle(0, 0,
-                    Math.min(16, wallAtlas16.getWidth()), Math.min(16, wallAtlas16.getHeight())));
-            return new DungeonTextures(true, f, w);
+        if ((dt.floorCells != null && dt.floorCells.length > 0) &&
+            (dt.wallCells != null && dt.wallCells.length > 0)) {
+            dt.ready = true;
+            return dt;
         }
 
-        // 4) If you prefer the 16x32 high walls atlas, fallback to that
-        BufferedImage wallAtlas32 = loadImage("/tiles/atlas_walls_high-16x32.png");
-        if (floorAtlas != null && wallAtlas32 != null) {
-            BufferedImage f = safeSub(floorAtlas, new Rectangle(0, 0,
-                    Math.min(16, floorAtlas.getWidth()), Math.min(16, floorAtlas.getHeight())));
-            BufferedImage w = safeSub(wallAtlas32, new Rectangle(0, 0,
-                    Math.min(16, wallAtlas32.getWidth()), Math.min(32, wallAtlas32.getHeight())));
-            return new DungeonTextures(true, f, w);
-        }
-
-        // 5) Some of your "Set X.Y.png" files (first cell fallback).
-        //    Note: spaces in resource names are allowed if they exist in the JAR/classpath.
-        String[] sets = {
-                "/tiles/Set 1.0.png", "/tiles/Set 1.1.png", "/tiles/Set 1.2.png",
-                "/tiles/Set 1.3.png", "/tiles/Set 1.png",   "/tiles/Set 3.5.png",
-                "/tiles/Set 4.5.png"
-        };
-        for (String p : sets) {
-            BufferedImage s = loadImage(p);
-            if (s != null) {
-                // Take two different-looking tiles from the sheet heuristically
-                BufferedImage f = safeSub(s, new Rectangle(0, 0,
-                        Math.min(16, s.getWidth()), Math.min(16, s.getHeight())));
-                BufferedImage w = safeSub(s, new Rectangle(Math.min(16, Math.max(0, s.getWidth()-1)), 0,
-                        Math.min(16, Math.max(1, s.getWidth()-16)), Math.min(16, s.getHeight())));
-                return new DungeonTextures(true, f, w);
-            }
-        }
-
-        // Nothing found -> disabled
-        return disabled();
-    }
-
-    /** Load explicitly from one PNG and two sub-rectangles. */
-    public static DungeonTextures from(String path, Rectangle floorRect, Rectangle wallRect) {
-        BufferedImage sheet = loadImage(path);
-        if (sheet == null) return disabled();
-        BufferedImage f = safeSub(sheet, floorRect);
-        BufferedImage w = safeSub(sheet, wallRect);
-        if (f == null || w == null) return disabled();
-        return new DungeonTextures(true, f, w);
-    }
-
-    /** Disabled instance -> no textures, draw fallback colors. */
-    public static DungeonTextures disabled() {
-        return new DungeonTextures(false, null, null);
+        // 2) Fallback to single images/atlases
+        dt.floorSprite = tryReadFS("src/resources/tiles/atlas_floor-16x16.png");
+        if (dt.floorSprite == null) dt.floorSprite = tryReadFS("src/resources/tiles/Set 1.png");
+        dt.wallSprite  = tryReadFS("src/resources/tiles/atlas_walls_low-16x16.png");
+        if (dt.wallSprite == null) dt.wallSprite = tryReadFS("src/resources/tiles/Set 3.5.png");
+        dt.ready = (dt.floorSprite != null && dt.wallSprite != null);
+        return dt;
     }
 
     public boolean isReady() { return ready; }
     public BufferedImage floor() { return floorSprite; }
     public BufferedImage wall() { return wallSprite; }
+    public BufferedImage doorFloor() { return doorFloor; }
 
-    // ---- helpers ----
-    private static BufferedImage loadImage(String path) {
-        InputStream in = null;
-        try {
-            in = DungeonTextures.class.getResourceAsStream(path);
-            if (in == null) {
-                // Also try context class loader (some build tools place resources differently)
-                ClassLoader cl = Thread.currentThread().getContextClassLoader();
-                if (cl != null) {
-                    in = cl.getResourceAsStream(path.startsWith("/") ? path.substring(1) : path);
-                }
-            }
-            if (in == null) return null;
-            return ImageIO.read(in);
-        } catch (IOException ignored) {
-            return null;
-        } finally {
-            if (in != null) {
-                try { in.close(); } catch (IOException ignored) {}
-            }
-        }
+    // 16x16 cell slicing helpers
+    public int floorVariants() {
+        if (floorCells != null && floorCells.length > 0) return floorCells.length;
+        return variantsFor(floorSprite, 16);
+    }
+    public int wallVariants()  {
+        if (wallCells != null && wallCells.length > 0) return wallCells.length;
+        return variantsFor(wallSprite, 16);
     }
 
-    private static BufferedImage safeSub(BufferedImage src, Rectangle r) {
-        if (src == null || r == null) return null;
-        int x = Math.max(0, r.x);
-        int y = Math.max(0, r.y);
-        int w = Math.max(1, Math.min(r.width,  src.getWidth()  - x));
-        int h = Math.max(1, Math.min(r.height, src.getHeight() - y));
-        if (w <= 0 || h <= 0) return null;
+    public BufferedImage floorVariant(int index) {
+        if (floorCells != null && floorCells.length > 0) return floorCells[Math.floorMod(index, floorCells.length)];
+        return subcell(floorSprite, 16, index);
+    }
+    public BufferedImage wallVariant(int index)  {
+        if (wallCells != null && wallCells.length > 0) return wallCells[Math.floorMod(index, wallCells.length)];
+        return subcell(wallSprite, 16, index);
+    }
+
+    private static int variantsFor(BufferedImage sheet, int cell) {
+        if (sheet == null || cell <= 0) return 0;
+        int cols = sheet.getWidth() / cell;
+        int rows = sheet.getHeight() / cell;
+        int n = cols * rows;
+        return n > 0 ? n : 0;
+    }
+
+    private static BufferedImage subcell(BufferedImage sheet, int cell, int index) {
+        if (sheet == null || cell <= 0) return null;
+        int cols = Math.max(1, sheet.getWidth() / cell);
+        int rows = Math.max(1, sheet.getHeight() / cell);
+        int n = cols * rows;
+        if (n <= 0) return sheet;
+        int i = Math.floorMod(index, n);
+        int cx = i % cols;
+        int cy = i / cols;
+        int x = cx * cell;
+        int y = cy * cell;
+        int w = Math.min(cell, sheet.getWidth() - x);
+        int h = Math.min(cell, sheet.getHeight() - y);
+        return sheet.getSubimage(x, y, w, h);
+    }
+
+    private static BufferedImage tryReadFS(String path) {
         try {
-            return src.getSubimage(x, y, w, h);
-        } catch (RasterFormatException ex) {
+            File f = new File(path);
+            if (f.exists()) return ImageIO.read(f);
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static BufferedImage[] loadFolderVariants(String folderPath, String prefix) {
+        try {
+            File dir = new File(folderPath);
+            if (!dir.exists() || !dir.isDirectory()) return null;
+            File[] files = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".png") && name.startsWith(prefix));
+            if (files == null || files.length == 0) return null;
+            Arrays.sort(files, Comparator.comparing(File::getName));
+            List<BufferedImage> imgs = new ArrayList<>();
+            for (File f : files) {
+                try { imgs.add(ImageIO.read(f)); } catch (Exception ignored) {}
+            }
+            return imgs.isEmpty() ? null : imgs.toArray(new BufferedImage[0]);
+        } catch (Exception ignored) {
             return null;
         }
     }
