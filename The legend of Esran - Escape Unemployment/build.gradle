@@ -70,30 +70,22 @@ sourceSets {
 
 tasks.withType(JavaCompile).configureEach {
     options.incremental = false
-    if (isWindowsHost) {
-        doFirst {
-            logger.lifecycle("Skipping stale class cleanup on Windows due to file locks.")
-        }
-    } else {
-        doFirst {
-            def dir = destinationDirectory.get().asFile
-            if (dir.exists()) {
-                def attempts = 0
-                def cleared = false
-                while (!cleared && attempts < 5) {
-                    attempts++
-                    project.delete(dir)
-                    cleared = !dir.exists()
-                    if (!cleared) {
-                        logger.warn("Attempt ${attempts} to clear stale classes in ${dir} is still pending; retrying...")
-                        System.gc()
-                        sleep(150)
-                    }
-                }
-                if (!cleared) {
-                    logger.warn("Proceeding with existing compiled classes under ${dir} after repeated cleanup attempts.")
-                }
+}
+
+if (!isWindowsHost) {
+    def purgeJavaClasses = tasks.register('purgeJavaClasses') {
+        group = 'build setup'
+        description = 'Removes compiled Java outputs before a fresh compilation on non-Windows hosts.'
+        doLast {
+            def classesDir = file("${buildDir}/classes")
+            if (classesDir.exists()) {
+                logger.lifecycle("Deleting ${classesDir} before recompiling Java sources.")
+                project.delete(classesDir)
             }
         }
+    }
+
+    tasks.withType(JavaCompile).configureEach { task ->
+        task.dependsOn(purgeJavaClasses)
     }
 }
