@@ -46,6 +46,16 @@ application {
     ]
 }
 
+tasks.register('runGameLauncher', JavaExec) {
+    group = 'application'
+    description = 'Launches the Swing-based game launcher without any manual IDE setup.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'launcher.GameLauncher'
+    workingDir = project.projectDir
+    jvmArgs '--module-path', javaFxLibDir.absolutePath,
+            '--add-modules', 'javafx.controls'
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
