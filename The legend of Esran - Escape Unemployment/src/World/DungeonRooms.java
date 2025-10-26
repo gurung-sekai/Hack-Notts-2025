@@ -25,8 +25,11 @@ import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
+import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
+import java.awt.geom.Point2D;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -68,6 +71,17 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     static final int PLAYER_SIZE = (int)(TILE * 0.6);
     static final int PLAYER_SPEED = 4;    // px per tick
     static final Color BG = new Color(6, 24, 32);
+    static final int PLAYER_PROJECTILE_RADIUS = 6;
+    static final int ENEMY_PROJECTILE_RADIUS = 5;
+
+    private static final int MINIMAP_MARGIN = 16;
+    private static final int MINIMAP_CELL_MIN = 10;
+    private static final int MINIMAP_CELL_MAX = 26;
+    private static final int MINIMAP_MAX_WIDTH = 220;
+    private static final int MINIMAP_MAX_HEIGHT = 220;
+    private static final int MINIMAP_HEADER = 26;
+    private static final int MINIMAP_FOOTER = 36;
+    private static final int MINIMAP_HORIZONTAL_PADDING = 12;
 
     enum T { VOID, FLOOR, WALL, DOOR }
     enum Dir { N, S, W, E }
@@ -87,7 +101,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         private static final long serialVersionUID = 1L;
         double x, y;
         double vx, vy;
-        int r = 4;
+        int r = ENEMY_PROJECTILE_RADIUS;
         boolean alive = true;
     }
 
@@ -174,6 +188,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private BufferedImage[] playerIdleFrames;
     private BufferedImage[] enemyIdleFrames;
     private BufferedImage[] bossIdleFrames;
+    private BufferedImage playerShotTexture;
+    private BufferedImage enemyShotTexture;
     private int animTick = 0;
     private int mouseX = COLS * TILE / 2, mouseY = ROWS * TILE / 2;
     private final List<Bullet> bullets = new ArrayList<>();       // enemy bullets
@@ -257,19 +273,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         statusTicks = 0;
         inBoss = false;
         paused = false;
-        textures = DungeonTextures.load();
-        playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
-        if (playerIdleFrames == null) {
-            playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
-        }
-        enemyIdleFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
-        if (enemyIdleFrames == null) {
-            enemyIdleFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
-        }
-        bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
-        if (bossIdleFrames == null) {
-            bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
-        }
+        refreshArtAssets();
         initializeBossPool();
         room = makeOrGetRoom(worldPos, null);
         spawnEnemiesIfNeeded(worldPos, room);
@@ -279,19 +283,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void restoreFromSnapshot(DungeonRoomsSnapshot snapshot) {
-        textures = DungeonTextures.load();
-        playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
-        if (playerIdleFrames == null) {
-            playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
-        }
-        enemyIdleFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
-        if (enemyIdleFrames == null) {
-            enemyIdleFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
-        }
-        bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
-        if (bossIdleFrames == null) {
-            bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
-        }
+        refreshArtAssets();
 
         world = snapshot.world();
         bossEncounters = snapshot.bossEncounters();
@@ -312,6 +304,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         bullets.addAll(snapshot.enemyBullets());
         playerBullets.clear();
         playerBullets.addAll(snapshot.playerBullets());
+        ensureProjectileDefaults(bullets, ENEMY_PROJECTILE_RADIUS);
+        ensureProjectileDefaults(playerBullets, PLAYER_PROJECTILE_RADIUS);
         explosions.clear();
         explosions.addAll(snapshot.explosions());
         playerHP = snapshot.playerHP();
@@ -326,6 +320,42 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         rng = snapshot.rng();
         secureRandom = snapshot.secureRandom();
         paused = false;
+    }
+
+    private void refreshArtAssets() {
+        textures = DungeonTextures.load();
+        playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
+        if (playerIdleFrames == null) {
+            playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
+        }
+        enemyIdleFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
+        if (enemyIdleFrames == null) {
+            enemyIdleFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        }
+        bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
+        if (bossIdleFrames == null) {
+            bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+        }
+        playerShotTexture = createProjectileTexture(
+                new Color(212, 247, 255, 255),
+                new Color(112, 206, 255, 220),
+                new Color(24, 110, 196, 170));
+        enemyShotTexture = createProjectileTexture(
+                new Color(255, 205, 150, 255),
+                new Color(232, 118, 62, 225),
+                new Color(132, 36, 20, 180));
+    }
+
+    private void ensureProjectileDefaults(List<Bullet> projectiles, int desiredRadius) {
+        if (projectiles == null) {
+            return;
+        }
+        for (Bullet b : projectiles) {
+            if (b == null) {
+                continue;
+            }
+            b.r = desiredRadius;
+        }
     }
 
     private void updateScale() {
@@ -385,6 +415,51 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             frames[i] = img;
         }
         return frames;
+    }
+
+    private BufferedImage createProjectileTexture(Color core, Color mid, Color edge) {
+        int size = 48;
+        BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            Point2D center = new Point2D.Float(size / 2f, size / 2f);
+            RadialGradientPaint paint = new RadialGradientPaint(center, size / 2f,
+                    new float[]{0f, 0.55f, 1f},
+                    new Color[]{core, mid, new Color(edge.getRed(), edge.getGreen(), edge.getBlue(), Math.min(255, edge.getAlpha() + 30))});
+            g.setPaint(paint);
+            g.fillOval(0, 0, size, size);
+            g.setComposite(AlphaComposite.SrcOver.derive(0.8f));
+            g.setColor(new Color(255, 255, 255, 190));
+            int highlightW = size / 4;
+            int highlightH = size / 5;
+            g.fillOval(size / 2 - highlightW, size / 2 - highlightH - 4, highlightW, highlightH);
+            g.setComposite(AlphaComposite.SrcOver);
+            g.setStroke(new BasicStroke(2f));
+            g.setColor(new Color(mid.getRed(), mid.getGreen(), mid.getBlue(), 200));
+            g.drawOval(2, 2, size - 4, size - 4);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    private void drawProjectile(Graphics2D g, Bullet bullet, BufferedImage texture, Color fallbackColour) {
+        if (bullet == null || !bullet.alive) {
+            return;
+        }
+        int diameter = Math.max(4, bullet.r * 2);
+        int drawX = (int) Math.round(bullet.x - diameter / 2.0);
+        int drawY = (int) Math.round(bullet.y - diameter / 2.0);
+        if (texture != null) {
+            g.drawImage(texture, drawX, drawY, diameter, diameter, null);
+        } else {
+            Color original = g.getColor();
+            g.setColor(fallbackColour == null ? Color.WHITE : fallbackColour);
+            g.fillOval(drawX, drawY, diameter, diameter);
+            g.setColor(original);
+        }
     }
 
     // ======= Room creation / persistence =======
@@ -512,6 +587,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 double l = Math.max(1e-6, Math.hypot(dx, dy));
                 b.vx = dx / l * spd;
                 b.vy = dy / l * spd;
+                b.r = ENEMY_PROJECTILE_RADIUS;
                 bullets.add(b);
                 e.cd = 60 + rng.nextInt(40);
             }
@@ -790,7 +866,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         double spd = 7.0;
         b.vx = dx / l * spd;
         b.vy = dy / l * spd;
-        b.r = 4;
+        b.r = PLAYER_PROJECTILE_RADIUS;
         playerBullets.add(b);
     }
 
@@ -1126,6 +1202,38 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         };
     }
 
+    private static Point step(Point origin, Dir dir) {
+        if (origin == null || dir == null) {
+            return null;
+        }
+        return switch (dir) {
+            case N -> new Point(origin.x, origin.y - 1);
+            case S -> new Point(origin.x, origin.y + 1);
+            case W -> new Point(origin.x - 1, origin.y);
+            case E -> new Point(origin.x + 1, origin.y);
+        };
+    }
+
+    private static boolean shouldDrawConnector(Point origin, Point neighbour) {
+        if (origin == null || neighbour == null) {
+            return false;
+        }
+        if (origin.x < neighbour.x) {
+            return true;
+        }
+        if (origin.x > neighbour.x) {
+            return false;
+        }
+        return origin.y < neighbour.y;
+    }
+
+    private static String pointKey(Point p) {
+        if (p == null) {
+            return "";
+        }
+        return p.x + ":" + p.y;
+    }
+
     // ======= Render =======
 
     @Override
@@ -1215,10 +1323,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.fillOval(player.x,player.y,player.width,player.height);
         }
 
-        gg.setColor(new Color(255,240,120));
-        for (Bullet b : bullets) if (b.alive) gg.fillOval((int)(b.x - b.r), (int)(b.y - b.r), b.r*2, b.r*2);
-        gg.setColor(new Color(120,210,255));
-        for (Bullet b : playerBullets) if (b.alive) gg.fillOval((int)(b.x - b.r), (int)(b.y - b.r), b.r*2, b.r*2);
+        gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        for (Bullet b : bullets) {
+            drawProjectile(gg, b, enemyShotTexture, new Color(255, 200, 120, 230));
+        }
+        for (Bullet b : playerBullets) {
+            drawProjectile(gg, b, playerShotTexture, new Color(160, 230, 255, 230));
+        }
 
         for (Explosion ex : explosions) {
             float t = ex.age / (float)Math.max(1, ex.life);
@@ -1252,16 +1363,220 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             overlay.drawString("Guardian Lair", getWidth() - 160, 18);
         }
 
+        Rectangle minimapArea = drawMinimap(overlay);
+        overlay.setColor(new Color(255, 255, 255, 210));
+
         if (!statusMessage.isBlank()) {
             int boxWidth = getWidth() - 20;
             int boxHeight = 26;
             int boxX = 10;
             int boxY = getHeight() - boxHeight - 10;
+            if (minimapArea != null) {
+                int candidateX = minimapArea.x + minimapArea.width + 10;
+                int candidateWidth = getWidth() - candidateX - 10;
+                if (candidateWidth >= 220) {
+                    boxX = candidateX;
+                    boxWidth = candidateWidth;
+                }
+            }
             overlay.setColor(new Color(0, 0, 0, 160));
-            overlay.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 10, 10);
-            overlay.setColor(new Color(255, 255, 255, 220));
-            overlay.drawString(statusMessage, boxX + 10, boxY + boxHeight - 8);
+            overlay.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 14, 14);
+            overlay.setColor(new Color(255, 255, 255, 230));
+            overlay.drawString(statusMessage, boxX + 10, boxY + 18);
         }
+    }
+
+    private Rectangle drawMinimap(Graphics2D overlay) {
+        if (overlay == null || worldPos == null) {
+            return null;
+        }
+        Set<Point> visitedRooms = visited == null ? Set.of() : visited;
+        Set<Point> accessible = new HashSet<>();
+        Set<Point> locked = new HashSet<>();
+        Set<Point> known = new HashSet<>();
+        if (world != null) {
+            known.addAll(world.keySet());
+        }
+        known.add(new Point(worldPos));
+        known.addAll(visitedRooms);
+
+        for (Point roomPos : visitedRooms) {
+            Room roomData = world.get(roomPos);
+            if (roomData == null) {
+                continue;
+            }
+            for (Dir door : roomData.doors) {
+                Point neighbour = step(roomPos, door);
+                if (visitedRooms.contains(neighbour)) {
+                    known.add(neighbour);
+                    continue;
+                }
+                if (roomData.lockedDoors.contains(door)) {
+                    locked.add(neighbour);
+                } else {
+                    accessible.add(neighbour);
+                }
+                known.add(neighbour);
+            }
+        }
+
+        if (known.isEmpty()) {
+            return null;
+        }
+
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (Point p : known) {
+            if (p == null) {
+                continue;
+            }
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+        }
+
+        if (minX == Integer.MAX_VALUE) {
+            return null;
+        }
+
+        int cellsWide = Math.max(1, maxX - minX + 1);
+        int cellsTall = Math.max(1, maxY - minY + 1);
+        int availableWidth = Math.max(MINIMAP_CELL_MIN, MINIMAP_MAX_WIDTH - MINIMAP_HORIZONTAL_PADDING * 2);
+        int availableHeight = Math.max(MINIMAP_CELL_MIN, MINIMAP_MAX_HEIGHT - MINIMAP_HEADER - MINIMAP_FOOTER);
+        int cellSize = Math.max(MINIMAP_CELL_MIN,
+                Math.min(MINIMAP_CELL_MAX,
+                        Math.min(availableWidth / Math.max(1, cellsWide),
+                                availableHeight / Math.max(1, cellsTall))));
+        if (cellSize <= 0) {
+            cellSize = MINIMAP_CELL_MIN;
+        }
+
+        int mapWidth = MINIMAP_HORIZONTAL_PADDING * 2 + cellSize * cellsWide;
+        int mapHeight = MINIMAP_HEADER + cellSize * cellsTall + MINIMAP_FOOTER;
+        int mapX = MINIMAP_MARGIN;
+        int mapY = Math.max(MINIMAP_MARGIN, getHeight() - mapHeight - MINIMAP_MARGIN);
+        Rectangle bounds = new Rectangle(mapX, mapY, mapWidth, mapHeight);
+
+        Color originalColour = overlay.getColor();
+        Stroke originalStroke = overlay.getStroke();
+
+        overlay.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        overlay.setColor(new Color(0, 0, 0, 182));
+        overlay.fillRoundRect(mapX, mapY, mapWidth, mapHeight, 18, 18);
+        overlay.setColor(new Color(110, 188, 204, 220));
+        overlay.setStroke(new BasicStroke(1.8f));
+        overlay.drawRoundRect(mapX, mapY, mapWidth, mapHeight, 18, 18);
+
+        overlay.setColor(new Color(218, 234, 240));
+        overlay.drawString(texts.text("hud_map"), mapX + MINIMAP_HORIZONTAL_PADDING, mapY + 18);
+
+        int gridOriginX = mapX + MINIMAP_HORIZONTAL_PADDING;
+        int gridOriginY = mapY + MINIMAP_HEADER;
+        Map<String, Rectangle> cellRects = new HashMap<>();
+        Map<String, Point> cellCenters = new HashMap<>();
+        for (Point p : known) {
+            if (p == null) {
+                continue;
+            }
+            int col = p.x - minX;
+            int row = p.y - minY;
+            int cellX = gridOriginX + col * cellSize;
+            int cellY = gridOriginY + row * cellSize;
+            Rectangle rect = new Rectangle(cellX, cellY, cellSize, cellSize);
+            String key = pointKey(p);
+            cellRects.put(key, rect);
+            cellCenters.put(key, new Point(cellX + cellSize / 2, cellY + cellSize / 2));
+        }
+
+        overlay.setStroke(new BasicStroke(Math.max(1f, cellSize / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        for (Point p : known) {
+            if (p == null) {
+                continue;
+            }
+            Room roomData = world.get(p);
+            if (roomData == null) {
+                continue;
+            }
+            Point centre = cellCenters.get(pointKey(p));
+            if (centre == null) {
+                continue;
+            }
+            for (Dir door : roomData.doors) {
+                Point neighbour = step(p, door);
+                if (!shouldDrawConnector(p, neighbour)) {
+                    continue;
+                }
+                Point neighbourCentre = cellCenters.get(pointKey(neighbour));
+                if (neighbourCentre == null) {
+                    continue;
+                }
+                Color connectorColour = new Color(88, 140, 170, 208);
+                if (!visitedRooms.contains(neighbour)) {
+                    if (accessible.contains(neighbour)) {
+                        connectorColour = new Color(138, 201, 38, 210);
+                    } else if (locked.contains(neighbour)) {
+                        connectorColour = new Color(220, 170, 90, 210);
+                    }
+                }
+                overlay.setColor(connectorColour);
+                overlay.drawLine(centre.x, centre.y, neighbourCentre.x, neighbourCentre.y);
+            }
+        }
+
+        int roomSize = Math.max(6, cellSize - 6);
+        int offset = (cellSize - roomSize) / 2;
+        for (Point p : known) {
+            if (p == null) {
+                continue;
+            }
+            Rectangle rect = cellRects.get(pointKey(p));
+            if (rect == null) {
+                continue;
+            }
+            int drawX = rect.x + offset;
+            int drawY = rect.y + offset;
+            Color fill;
+            if (p.equals(worldPos)) {
+                fill = new Color(255, 240, 160, 240);
+            } else if (visitedRooms.contains(p)) {
+                fill = new Color(82, 144, 182, 228);
+            } else if (accessible.contains(p)) {
+                fill = new Color(138, 201, 38, 220);
+            } else if (locked.contains(p)) {
+                fill = new Color(220, 170, 90, 220);
+            } else {
+                fill = new Color(80, 96, 120, 160);
+            }
+            overlay.setColor(fill);
+            overlay.fillRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            BossEncounter encounter = bossEncounters.get(p);
+            if (encounter != null && !encounter.defeated) {
+                overlay.setColor(new Color(210, 120, 200, 232));
+                overlay.setStroke(new BasicStroke(2f));
+                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            } else if (p.equals(worldPos)) {
+                overlay.setColor(new Color(255, 255, 255, 230));
+                overlay.setStroke(new BasicStroke(1.8f));
+                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            }
+        }
+
+        int footerY = mapY + mapHeight - 18;
+        overlay.setStroke(originalStroke);
+        overlay.setColor(new Color(210, 226, 232));
+        overlay.drawString(texts.text("hud_rooms", visitedRooms.size()), mapX + MINIMAP_HORIZONTAL_PADDING, footerY);
+        overlay.drawString(texts.text("hud_exits", accessible.size()), mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 16);
+        if (!locked.isEmpty()) {
+            overlay.setColor(new Color(235, 210, 160));
+            overlay.drawString(texts.text("hud_locked", locked.size()), mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 32);
+        }
+
+        overlay.setColor(originalColour);
+        overlay.setStroke(originalStroke);
+        return bounds;
     }
 
     private String keyName(ControlAction action) {
