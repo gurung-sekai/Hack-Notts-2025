@@ -4,6 +4,7 @@ import util.ResourceLoader;
 import util.SpriteSheetSlicer;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,7 +35,8 @@ public class AnimatedSprite {
     public int h() { return drawH; }
 
     public void add(State s, BufferedImage[] frames) {
-        if (frames != null && frames.length > 0) states.put(s, frames);
+        BufferedImage[] normalised = normalise(frames);
+        if (normalised != null && normalised.length > 0) states.put(s, normalised);
     }
 
     /** Load frames from a classpath prefix: /path/name_f  -> name_f0.png ... */
@@ -67,6 +69,63 @@ public class AnimatedSprite {
         } catch (IOException e) {
             throw new RuntimeException("Failed to slice sprite sheet: " + resourcePath, e);
         }
+    }
+
+    private static BufferedImage[] normalise(BufferedImage[] frames) {
+        if (frames == null || frames.length == 0) {
+            return null;
+        }
+
+        int maxW = 0;
+        int maxH = 0;
+        for (BufferedImage frame : frames) {
+            if (frame == null) {
+                continue;
+            }
+            if (frame.getWidth() > maxW) {
+                maxW = frame.getWidth();
+            }
+            if (frame.getHeight() > maxH) {
+                maxH = frame.getHeight();
+            }
+        }
+
+        if (maxW <= 0 || maxH <= 0) {
+            return new BufferedImage[0];
+        }
+
+        boolean uniform = true;
+        for (BufferedImage frame : frames) {
+            if (frame == null) {
+                continue;
+            }
+            if (frame.getWidth() != maxW || frame.getHeight() != maxH) {
+                uniform = false;
+                break;
+            }
+        }
+        if (uniform) {
+            return frames.clone();
+        }
+
+        BufferedImage[] aligned = new BufferedImage[frames.length];
+        for (int i = 0; i < frames.length; i++) {
+            BufferedImage frame = frames[i];
+            if (frame == null) {
+                frame = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+            }
+            BufferedImage padded = new BufferedImage(maxW, maxH, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = padded.createGraphics();
+            try {
+                int x = (maxW - frame.getWidth()) / 2;
+                int y = maxH - frame.getHeight();
+                g.drawImage(frame, x, y, null);
+            } finally {
+                g.dispose();
+            }
+            aligned[i] = padded;
+        }
+        return aligned;
     }
 
     public void update(double dt) {
