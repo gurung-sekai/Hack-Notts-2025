@@ -15,8 +15,10 @@
 
 ## Overview
 
-**The Legend of Aetheria** is a 2D dungeon crawler built entirely in **pure Java**, without any engines or frameworks.  
-Each dungeon is procedurally generated with randomized obstacles, enemy placements, and door configurations — creating a fresh experience every time.  
+**The Legend of Aetheria** is a 2D dungeon crawler built entirely in **pure Java**, without any engines or frameworks.
+Each dungeon is procedurally generated with randomized obstacles, enemy placements, and door configurations — creating a fresh experience every time.
+
+> **Windows build note:** If you are working inside a OneDrive-synchronised folder, Gradle will automatically redirect its build output to `%LOCALAPPDATA%\HackNotts\legend-of-esran` to avoid the `Unable to delete directory … build/classes/java/main` error. You can override the location via the `legend.buildDir` Gradle property or the `GRADLE_BUILD_DIR` environment variable when needed.
 
 The player explores interconnected rooms, fights monsters, collects bows, keys, and arrows, and survives until facing the **final boss** — a large red monster that signifies the beginning of an upcoming turn-based battle system.
 

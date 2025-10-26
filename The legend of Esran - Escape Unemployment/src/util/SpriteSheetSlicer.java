@@ -5,9 +5,11 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -20,8 +22,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class SpriteSheetSlicer {
 
     /** Immutable configuration for a slicing run. */
-    public record Options(int backgroundTolerance, int alphaThreshold, int padding, int minFrameArea, int joinGap) {
-        public static final Options DEFAULT = new Options(72, 32, 2, 160, 1);
+    public record Options(int backgroundTolerance,
+                          int alphaThreshold,
+                          int padding,
+                          int minFrameArea,
+                          int joinGap,
+                          int aiIterations) {
+        public static final Options DEFAULT = new Options(72, 32, 2, 160, 1, 12);
 
         public Options {
             if (backgroundTolerance < 0) throw new IllegalArgumentException("backgroundTolerance must be >= 0");
@@ -29,13 +36,15 @@ public final class SpriteSheetSlicer {
             if (padding < 0) throw new IllegalArgumentException("padding must be >= 0");
             if (minFrameArea < 1) throw new IllegalArgumentException("minFrameArea must be >= 1");
             if (joinGap < 0) throw new IllegalArgumentException("joinGap must be >= 0");
+            if (aiIterations < 1) throw new IllegalArgumentException("aiIterations must be >= 1");
         }
 
-        public Options withPadding(int padding) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, joinGap); }
-        public Options withTolerance(int tolerance) { return new Options(tolerance, alphaThreshold, padding, minFrameArea, joinGap); }
-        public Options withAlphaThreshold(int threshold) { return new Options(backgroundTolerance, threshold, padding, minFrameArea, joinGap); }
-        public Options withMinFrameArea(int area) { return new Options(backgroundTolerance, alphaThreshold, padding, area, joinGap); }
-        public Options withJoinGap(int gap) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, gap); }
+        public Options withPadding(int padding) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, joinGap, aiIterations); }
+        public Options withTolerance(int tolerance) { return new Options(tolerance, alphaThreshold, padding, minFrameArea, joinGap, aiIterations); }
+        public Options withAlphaThreshold(int threshold) { return new Options(backgroundTolerance, threshold, padding, minFrameArea, joinGap, aiIterations); }
+        public Options withMinFrameArea(int area) { return new Options(backgroundTolerance, alphaThreshold, padding, area, joinGap, aiIterations); }
+        public Options withJoinGap(int gap) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, gap, aiIterations); }
+        public Options withAiIterations(int iterations) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, joinGap, iterations); }
     }
 
     private record CacheKey(String resourcePath, Options options) {}
@@ -143,7 +152,8 @@ public final class SpriteSheetSlicer {
         }
 
         List<FrameBounds> merged = mergeBounds(bounds, opts);
-        merged.sort((a, b) -> {
+        List<FrameBounds> refined = refineWithAi(merged, clean, opts);
+        refined.sort((a, b) -> {
             int cmp = Integer.compare(a.minY(), b.minY());
             if (cmp == 0) {
                 cmp = Integer.compare(a.minX(), b.minX());
@@ -151,9 +161,9 @@ public final class SpriteSheetSlicer {
             return cmp;
         });
 
-        BufferedImage[] arr = new BufferedImage[merged.size()];
-        for (int i = 0; i < merged.size(); i++) {
-            FrameBounds boundsWithPadding = merged.get(i).expand(opts.padding(), width, height);
+        BufferedImage[] arr = new BufferedImage[refined.size()];
+        for (int i = 0; i < refined.size(); i++) {
+            FrameBounds boundsWithPadding = refined.get(i).expand(opts.padding(), width, height);
             int frameW = boundsWithPadding.width();
             int frameH = boundsWithPadding.height();
             BufferedImage frame = new BufferedImage(frameW, frameH, BufferedImage.TYPE_INT_ARGB);
@@ -195,7 +205,7 @@ public final class SpriteSheetSlicer {
         int width = sheet.getWidth();
         int height = sheet.getHeight();
         if (width <= 0 || height <= 0) {
-            return new CleanSheet(width, height, new int[0], new int[0]);
+            return new CleanSheet(width, height, new int[0], new int[0], new int[0]);
         }
 
         int[] src = sheet.getRGB(0, 0, width, height, null, 0, width);
@@ -204,6 +214,7 @@ public final class SpriteSheetSlicer {
 
         int[] cleaned = new int[src.length];
         int[] colCounts = new int[width];
+        int[] rowCounts = new int[height];
 
         for (int y = 0; y < height; y++) {
             int rowIndex = y * width;
@@ -225,10 +236,11 @@ public final class SpriteSheetSlicer {
                     cleaned[idx] = argb | 0xFF000000;
                 }
                 colCounts[x]++;
+                rowCounts[y]++;
             }
         }
 
-        return new CleanSheet(width, height, cleaned, colCounts);
+        return new CleanSheet(width, height, cleaned, colCounts, rowCounts);
     }
 
     private record FrameBounds(int minX, int minY, int maxX, int maxY, int pixelCount) {
@@ -305,7 +317,247 @@ public final class SpriteSheetSlicer {
         return working;
     }
 
-    private record CleanSheet(int width, int height, int[] pixels, int[] colCounts) {}
+    private record CleanSheet(int width, int height, int[] pixels, int[] colCounts, int[] rowCounts) {}
+
+    private record Segment(int start, int end) {
+        int size() { return Math.max(0, end - start); }
+    }
+
+    /**
+     * Refine raw connected components with an unsupervised clustering pass.  We treat each column/row density as a
+     * feature vector and run a lightweight k-means (k=2) to distinguish sprite pixels from separator gaps.  This keeps
+     * the slicer dependency-free while still giving it "AI" behaviour that can recognise sprite grids without explicit
+     * metadata.
+     */
+    private static List<FrameBounds> refineWithAi(List<FrameBounds> baseFrames, CleanSheet clean, Options opts) {
+        if (baseFrames.isEmpty()) {
+            return baseFrames;
+        }
+        List<FrameBounds> refined = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (FrameBounds frame : baseFrames) {
+            List<FrameBounds> splits = splitFrameWithAi(frame, clean, opts);
+            if (splits.isEmpty()) {
+                register(refined, seen, frame);
+            } else {
+                for (FrameBounds split : splits) {
+                    register(refined, seen, split);
+                }
+            }
+        }
+        return refined;
+    }
+
+    private static void register(List<FrameBounds> out, Set<String> seen, FrameBounds frame) {
+        String key = frame.minX() + ":" + frame.minY() + ":" + frame.maxX() + ":" + frame.maxY();
+        if (seen.add(key)) {
+            out.add(frame);
+        }
+    }
+
+    private static List<FrameBounds> splitFrameWithAi(FrameBounds frame, CleanSheet clean, Options opts) {
+        int minX = frame.minX();
+        int minY = frame.minY();
+        int maxX = frame.maxX();
+        int maxY = frame.maxY();
+
+        int width = clean.width();
+        int[] pixels = clean.pixels();
+
+        int cellW = Math.max(1, maxX - minX + 1);
+        int cellH = Math.max(1, maxY - minY + 1);
+
+        double[] columnDensity = new double[cellW];
+        double[] rowDensity = new double[cellH];
+
+        int pixelCount = 0;
+        for (int y = minY; y <= maxY; y++) {
+            int rowIndex = y * width;
+            for (int x = minX; x <= maxX; x++) {
+                int argb = pixels[rowIndex + x];
+                if ((argb >>> 24) == 0) {
+                    continue;
+                }
+                columnDensity[x - minX]++;
+                rowDensity[y - minY]++;
+                pixelCount++;
+            }
+        }
+
+        if (pixelCount <= opts.minFrameArea() && frame.area() <= opts.minFrameArea()) {
+            return List.of();
+        }
+
+        normalise(columnDensity, cellH);
+        normalise(rowDensity, cellW);
+
+        List<Segment> vertical = segmentAxis(columnDensity, minX, opts);
+        List<Segment> horizontal = segmentAxis(rowDensity, minY, opts);
+
+        if (vertical.size() <= 1 && horizontal.size() <= 1) {
+            return List.of();
+        }
+
+        List<FrameBounds> splits = new ArrayList<>();
+        for (Segment vx : vertical) {
+            for (Segment hy : horizontal) {
+                FrameBounds candidate = extractBounds(clean, vx, hy, opts);
+                if (candidate != null) {
+                    splits.add(candidate);
+                }
+            }
+        }
+
+        if (splits.isEmpty()) {
+            return List.of();
+        }
+
+        return mergeBounds(splits, opts.withJoinGap(0));
+    }
+
+    private static void normalise(double[] densities, int divisor) {
+        double norm = divisor <= 0 ? 1.0 : divisor;
+        for (int i = 0; i < densities.length; i++) {
+            densities[i] = densities[i] / norm;
+        }
+    }
+
+    private static List<Segment> segmentAxis(double[] densities, int offset, Options opts) {
+        if (densities.length == 0) {
+            return List.of();
+        }
+        boolean[] gapMask = classifyGaps(densities, opts);
+        if (gapMask == null) {
+            return List.of(new Segment(offset, offset + densities.length));
+        }
+
+        List<Segment> segments = new ArrayList<>();
+        int minGap = Math.max(2, densities.length / 24);
+        int start = offset;
+        for (int idx = 0; idx < densities.length; ) {
+            if (!gapMask[idx]) {
+                idx++;
+                continue;
+            }
+            int runStart = idx;
+            while (idx < densities.length && gapMask[idx]) {
+                idx++;
+            }
+            int runEnd = idx;
+            if (runEnd - runStart >= minGap) {
+                int segmentEnd = offset + runStart;
+                if (segmentEnd > start) {
+                    segments.add(new Segment(start, segmentEnd));
+                }
+                start = offset + runEnd;
+            }
+        }
+        int finalEnd = offset + densities.length;
+        if (finalEnd > start) {
+            segments.add(new Segment(start, finalEnd));
+        }
+
+        if (segments.isEmpty()) {
+            return List.of(new Segment(offset, offset + densities.length));
+        }
+
+        return segments;
+    }
+
+    private static boolean[] classifyGaps(double[] densities, Options opts) {
+        double min = Double.POSITIVE_INFINITY;
+        double max = Double.NEGATIVE_INFINITY;
+        for (double v : densities) {
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+        if (!Double.isFinite(min) || !Double.isFinite(max) || Math.abs(max - min) < 1e-4) {
+            return null;
+        }
+
+        double centroidLow = min;
+        double centroidHigh = max;
+        int iterations = Math.max(1, opts.aiIterations());
+        boolean[] assignment = new boolean[densities.length];
+
+        for (int iter = 0; iter < iterations; iter++) {
+            double sumLow = 0;
+            double sumHigh = 0;
+            int countLow = 0;
+            int countHigh = 0;
+
+            for (int i = 0; i < densities.length; i++) {
+                double value = densities[i];
+                double distLow = Math.abs(value - centroidLow);
+                double distHigh = Math.abs(value - centroidHigh);
+                if (distLow <= distHigh) {
+                    assignment[i] = true;
+                    sumLow += value;
+                    countLow++;
+                } else {
+                    assignment[i] = false;
+                    sumHigh += value;
+                    countHigh++;
+                }
+            }
+
+            if (countLow > 0) {
+                centroidLow = sumLow / countLow;
+            }
+            if (countHigh > 0) {
+                centroidHigh = sumHigh / countHigh;
+            }
+        }
+
+        double separation = Math.abs(centroidHigh - centroidLow);
+        if (separation < 1e-3) {
+            return null;
+        }
+
+        boolean gapIsLow = centroidLow < centroidHigh;
+        boolean[] gapMask = new boolean[densities.length];
+        for (int i = 0; i < densities.length; i++) {
+            boolean assignedLow = assignment[i];
+            gapMask[i] = gapIsLow ? assignedLow : !assignedLow;
+        }
+        return gapMask;
+    }
+
+    private static FrameBounds extractBounds(CleanSheet clean, Segment vx, Segment hy, Options opts) {
+        int sheetWidth = clean.width();
+        int[] pixels = clean.pixels();
+
+        int minX = vx.end;
+        int minY = hy.end;
+        int maxX = vx.start - 1;
+        int maxY = hy.start - 1;
+        int pixelCount = 0;
+
+        for (int y = hy.start; y < hy.end; y++) {
+            int rowIndex = y * sheetWidth;
+            for (int x = vx.start; x < vx.end; x++) {
+                int argb = pixels[rowIndex + x];
+                if ((argb >>> 24) == 0) {
+                    continue;
+                }
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+                pixelCount++;
+            }
+        }
+
+        if (pixelCount == 0) {
+            return null;
+        }
+
+        FrameBounds bounds = new FrameBounds(minX, minY, maxX, maxY, pixelCount);
+        if (bounds.area() < opts.minFrameArea() && pixelCount < opts.minFrameArea()) {
+            return null;
+        }
+        return bounds;
+    }
 
     private static int estimateBackground(int[] pixels, int width, int height) {
         Map<Integer, Integer> counts = new HashMap<>();
