@@ -1,5 +1,7 @@
 import org.gradle.api.Project
 import org.gradle.api.tasks.compile.JavaCompile
+import java.io.IOException
+import java.util.Locale
 
 plugins {
     id 'application'
@@ -28,7 +30,50 @@ if (javaFxLibDir == null) {
             "javafx-sdk-21.0.2/lib, javafx-sdk-25.0.1/lib, javafx-sdk/lib, or lib/javafx relative to the project root.")
 }
 
-def isWindowsHost = System.properties['os.name']?.toLowerCase()?.contains('win') ?: false
+def isWindowsHost = System.properties['os.name']?.toLowerCase(Locale.ROOT)?.contains('win') ?: false
+
+File defaultBuildDir = project.buildDir
+
+def resolveBuildRoot(boolean isWindowsHostValue, File defaultDir) {
+    def override = System.getenv('GRADLE_BUILD_DIR') ?: (hasProperty('legend.buildDir') ? property('legend.buildDir') : null)
+    if (override) {
+        return file(override)
+    }
+
+    if (!isWindowsHostValue) {
+        return defaultDir
+    }
+
+    def canonical = { File candidate ->
+        try {
+            return candidate.canonicalFile
+        } catch (IOException ignored) {
+            return candidate.absoluteFile
+        }
+    }
+
+    File rootCanonical = canonical(project.rootDir)
+    List<File> oneDriveRoots = ['ONEDRIVE', 'OneDriveCommercial', 'OneDriveConsumer', 'OneDrive', 'OneDriveEducation']
+            .collect { System.getenv(it) }
+            .findAll { it }
+            .collect { canonical(new File(it)) }
+
+    boolean underOneDrive = oneDriveRoots.any { rootCanonical.path.equalsIgnoreCase(it.path) || rootCanonical.path.startsWith(it.path + File.separator) }
+    if (!underOneDrive) {
+        return defaultDir
+    }
+
+    String base = System.getenv('LOCALAPPDATA') ?: System.getenv('TEMP') ?: System.getProperty('java.io.tmpdir')
+    File safeRoot = new File(base, "HackNotts/${project.name}")
+    return safeRoot
+}
+
+File resolvedBuildDir = resolveBuildRoot(isWindowsHost, defaultBuildDir)
+if (resolvedBuildDir != defaultBuildDir) {
+    logger.lifecycle("Using build directory ${resolvedBuildDir} to avoid cloud sync locks. Set legend.buildDir or GRADLE_BUILD_DIR to override.")
+}
+
+layout.buildDirectory.set(resolvedBuildDir)
 
 def javaFxJars = javaFxLibDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
 if (javaFxJars.isEmpty()) {
