@@ -7,6 +7,7 @@ import Battle.util.Rng;
 import fx.Effect;
 import fx.FXLibrary;
 import gfx.AnimatedSprite;
+import gfx.SpriteSheetSlicer;
 
 import javax.swing.*;
 import java.awt.*;
@@ -592,13 +593,8 @@ public class BossBattlePanel extends JPanel {
     }
 
     private static SpriteSource sheetSource(String resourcePath) {
-        return sheetSource(resourcePath, SpriteSheetSlicer.Options.DEFAULT);
-    }
-
-    private static SpriteSource sheetSource(String resourcePath, SpriteSheetSlicer.Options options) {
         Objects.requireNonNull(resourcePath, "resourcePath");
-        SpriteSheetSlicer.Options opts = options == null ? SpriteSheetSlicer.Options.DEFAULT : options;
-        return sprite -> sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath, opts);
+        return sprite -> sprite.add(AnimatedSprite.State.IDLE, SpriteSheetSlicer.sliceFromResource(resourcePath));
     }
 
     // ---------------------------------------------------------------------
@@ -698,9 +694,9 @@ public class BossBattlePanel extends JPanel {
                 case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
                         new Stats(265, 17, 21, 9), prefixSource("/resources/sprites/Bigzombie/big_zombie_idle_anim_f"), 3.8, 0.88, 1.12, -1);
                 case GOLLUM -> new BossDefinition("Gollum", Affinity.STORM,
-                        new Stats(205, 23, 13, 27), sheetSource("/resources/bosses/Gollum.png"), 1.6, 1.05, 0.92, 1);
+                        new Stats(205, 23, 13, 27), sheetSource("/resources/bosses/gollum.png"), 1.6, 1.05, 0.92, 1);
                 case GRIM -> new BossDefinition("Grim", Affinity.STONE,
-                        new Stats(245, 26, 18, 18), sheetSource("/resources/bosses/Grim.png"), 1.5, 1.1, 1.05, 0);
+                        new Stats(245, 26, 18, 18), sheetSource("/resources/bosses/grim.png"), 1.5, 1.1, 1.05, 0);
                 case FIRE_FLINGER -> new BossDefinition("Fire Flinger", Affinity.EMBER,
                         new Stats(215, 24, 14, 23), sheetSource("/resources/bosses/fireFlinger.png"), 1.1, 1.08, 0.95, 1);
                 case GOLD_MECH -> new BossDefinition("Gold Mech", Affinity.STONE,
