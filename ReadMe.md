@@ -20,6 +20,13 @@ Each dungeon is procedurally generated with randomized obstacles, enemy placemen
 
 The player explores interconnected rooms, fights monsters, collects bows, keys, and arrows, and survives until facing the **final boss** — a large red monster that signifies the beginning of an upcoming turn-based battle system.
 
+
+Our gameplay Video is uploaded on Youtube! 
+
+https://www.youtube.com/watch?v=2vcR7R3X1Wk
+
+edited by Julil
+
 ---
 
 ## Architecture Overview
@@ -209,8 +216,6 @@ Enemy.java
 
 https://github.com/user-attachments/assets/db35e8b3-03a1-403c-a27f-1af4b79ce809
 
-
-https://www.youtube.com/watch?v=2vcR7R3X1Wk
 
 ---
 
