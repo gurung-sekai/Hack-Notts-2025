@@ -26,7 +26,7 @@ public final class SpriteSheetSlicer {
                           int minFrameArea,
                           int joinGap,
                           int haloPasses) {
-        public static final Options DEFAULT = new Options(64, 24, 2, 120, 1, 2);
+        public static final Options DEFAULT = new Options(64, 24, 2, 120, 1, 1);
 
         public Options {
             if (backgroundTolerance < 0) throw new IllegalArgumentException("backgroundTolerance must be >= 0");
@@ -241,7 +241,13 @@ public final class SpriteSheetSlicer {
                     if (colourDistanceSq(rgb, backgroundRgb) > tolSq) {
                         continue;
                     }
+                    if (!touchesBackground(backgroundMask, width, height, x, y)) {
+                        continue;
+                    }
                     if (touchesStrongColour(cleaned, backgroundMask, width, height, x, y, tolSq, backgroundRgb)) {
+                        continue;
+                    }
+                    if (countOpaqueNeighbours(cleaned, backgroundMask, width, height, x, y) >= 5) {
                         continue;
                     }
                     cleaned[idx] = 0;
@@ -253,6 +259,49 @@ public final class SpriteSheetSlicer {
                 break;
             }
         }
+    }
+
+    private static boolean touchesBackground(boolean[] backgroundMask,
+                                             int width,
+                                             int height,
+                                             int x,
+                                             int y) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                if (backgroundMask[ny * width + nx]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int countOpaqueNeighbours(int[] cleaned,
+                                             boolean[] backgroundMask,
+                                             int width,
+                                             int height,
+                                             int x,
+                                             int y) {
+        int count = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                int idx = ny * width + nx;
+                if (backgroundMask[idx]) continue;
+                int argb = cleaned[idx];
+                if ((argb >>> 24) != 0) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private static boolean touchesStrongColour(int[] cleaned,
@@ -359,6 +408,13 @@ public final class SpriteSheetSlicer {
             }
 
             FrameBounds candidate = new FrameBounds(minX, minY, maxX, maxY, pixelCount);
+            if (isEdgeMatte(candidate, width, height)) {
+                continue;
+            }
+            if ((candidate.area() < opts.minFrameArea() * 2)
+                    && (candidate.width() < 32 || candidate.height() < 32)) {
+                continue;
+            }
             if (candidate.area() < opts.minFrameArea() && pixelCount < opts.minFrameArea()) {
                 continue;
             }
@@ -459,32 +515,72 @@ public final class SpriteSheetSlicer {
     private record CleanSheet(int width, int height, int[] pixels) {}
 
     private static int estimateBackground(int[] pixels, int width, int height) {
-        java.util.HashMap<Integer, Integer> counts = new java.util.HashMap<>();
+        java.util.HashMap<Integer, SampleStats> stats = new java.util.HashMap<>();
         int stepX = Math.max(1, width / 12);
         int stepY = Math.max(1, height / 12);
 
         for (int x = 0; x < width; x += stepX) {
-            sample(pixels, width, height, counts, x, 0);
-            sample(pixels, width, height, counts, x, height - 1);
+            sample(pixels, width, height, stats, x, 0);
+            sample(pixels, width, height, stats, x, height - 1);
         }
         for (int y = 0; y < height; y += stepY) {
-            sample(pixels, width, height, counts, 0, y);
-            sample(pixels, width, height, counts, width - 1, y);
+            sample(pixels, width, height, stats, 0, y);
+            sample(pixels, width, height, stats, width - 1, y);
         }
 
-        return counts.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElseGet(() -> pixels.length == 0 ? 0 : pixels[0] & 0x00FFFFFF);
+        SampleStats preferred = null;
+        long preferredScore = Long.MIN_VALUE;
+        SampleStats fallback = null;
+        long fallbackScore = Long.MIN_VALUE;
+
+        for (SampleStats stat : stats.values()) {
+            if (stat.count() == 0) {
+                continue;
+            }
+            long brightness = stat.avgBrightness();
+            long saturation = stat.avgSaturation();
+            long score = stat.baseScore();
+            if (score > fallbackScore) {
+                fallbackScore = score;
+                fallback = stat;
+            }
+            if (brightness >= 170 && saturation <= 96) {
+                long brightScore = score * 4 + brightness * 2048L;
+                if (brightScore > preferredScore) {
+                    preferredScore = brightScore;
+                    preferred = stat;
+                }
+            }
+        }
+
+        SampleStats chosen = preferred != null ? preferred : fallback;
+        if (chosen != null) {
+            return chosen.toColour();
+        }
+        return pixels.length == 0 ? 0 : pixels[0] & 0x00FFFFFF;
     }
 
-    private static void sample(int[] pixels, int width, int height, Map<Integer, Integer> counts, int x, int y) {
+    private static void sample(int[] pixels,
+                               int width,
+                               int height,
+                               Map<Integer, SampleStats> stats,
+                               int x,
+                               int y) {
         if (x < 0 || y < 0 || x >= width || y >= height) return;
         int argb = pixels[y * width + x];
         int alpha = (argb >>> 24) & 0xFF;
         if (alpha < 16) return;
         int rgb = argb & 0x00FFFFFF;
-        counts.merge(rgb, 1, Integer::sum);
+        int key = quantize(rgb);
+        SampleStats stat = stats.computeIfAbsent(key, k -> new SampleStats());
+        stat.add(rgb);
+    }
+
+    private static int quantize(int rgb) {
+        int r = (rgb >>> 16) & 0xFF;
+        int g = (rgb >>> 8) & 0xFF;
+        int b = rgb & 0xFF;
+        return ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
     }
 
     private static int colourDistanceSq(int rgb, int otherRgb) {
@@ -498,5 +594,91 @@ public final class SpriteSheetSlicer {
         int dg = g1 - g2;
         int db = b1 - b2;
         return dr * dr + dg * dg + db * db;
+    }
+
+    private static boolean isEdgeMatte(FrameBounds bounds, int sheetWidth, int sheetHeight) {
+        int width = bounds.width();
+        int height = bounds.height();
+        long area = (long) width * height;
+        long sheetArea = (long) sheetWidth * sheetHeight;
+        int edgeSlackX = Math.max(2, sheetWidth / 64);
+        int edgeSlackY = Math.max(2, sheetHeight / 64);
+        boolean touchesLeft = bounds.minX <= edgeSlackX;
+        boolean touchesRight = bounds.maxX >= sheetWidth - 1 - edgeSlackX;
+        boolean touchesTop = bounds.minY <= edgeSlackY;
+        boolean touchesBottom = bounds.maxY >= sheetHeight - 1 - edgeSlackY;
+        boolean spansHorizontally = touchesLeft && touchesRight;
+        boolean spansVertically = touchesTop && touchesBottom;
+
+        if (area >= sheetArea * 3 / 5) {
+            return true;
+        }
+        if (spansHorizontally && height >= sheetHeight / 2) {
+            return true;
+        }
+        if (spansVertically && width >= sheetWidth / 2) {
+            return true;
+        }
+        if ((touchesTop || touchesBottom) && spansHorizontally && height >= sheetHeight / 4) {
+            return true;
+        }
+        if ((touchesLeft || touchesRight) && spansVertically && width >= sheetWidth / 3) {
+            return true;
+        }
+        return false;
+    }
+
+    private static final class SampleStats {
+        private int count;
+        private long sumR;
+        private long sumG;
+        private long sumB;
+        private long sumBrightness;
+        private long sumSaturation;
+
+        void add(int rgb) {
+            int r = (rgb >>> 16) & 0xFF;
+            int g = (rgb >>> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            int max = Math.max(r, Math.max(g, b));
+            int min = Math.min(r, Math.min(g, b));
+            count++;
+            sumR += r;
+            sumG += g;
+            sumB += b;
+            sumBrightness += max;
+            sumSaturation += (max - min);
+        }
+
+        int count() {
+            return count;
+        }
+
+        long avgBrightness() {
+            return count == 0 ? 0 : sumBrightness / count;
+        }
+
+        long avgSaturation() {
+            return count == 0 ? 0 : sumSaturation / count;
+        }
+
+        long baseScore() {
+            if (count == 0) {
+                return Long.MIN_VALUE;
+            }
+            long brightnessWeight = 64 + avgBrightness();
+            long saturationWeight = 64 + (255 - avgSaturation());
+            return (long) count * brightnessWeight * saturationWeight;
+        }
+
+        int toColour() {
+            if (count == 0) {
+                return 0;
+            }
+            int r = (int) (sumR / count);
+            int g = (int) (sumG / count);
+            int b = (int) (sumB / count);
+            return (r << 16) | (g << 8) | b;
+        }
     }
 }
