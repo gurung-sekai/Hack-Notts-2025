@@ -34,7 +34,7 @@ Each component has a clearly separated responsibility, making the project scalab
 
 ---
 
-## 🧩 Game Loop
+## Game Loop
 
 The core loop runs at **~60 FPS** using a `Timer`-based update system:
 
@@ -52,7 +52,7 @@ This ensures consistent frame pacing and smooth motion across systems.
 
 ---
 
-## 🏗️ Procedural Dungeon Generation
+## Procedural Dungeon Generation
 
 Each dungeon room is **generated on the fly** with random tiles, walls, and enemy layouts.  
 Key design features:
@@ -69,7 +69,7 @@ Returning to an earlier room restores its previous layout, ensuring continuity.
 
 ---
 
-## 🧙 Player System
+## Player System
 
 The player can move, swing a sword, and fire arrows once a bow is obtained.  
 The control system is designed for fluid movement and balanced combat.
@@ -90,16 +90,16 @@ The control system is designed for fluid movement and balanced combat.
 
 ---
 
-## 👾 Enemy System
+## Enemy System
 
 The world is populated with four primary enemy types:
 
 | Enemy | Speed | Attack Type | Behavior |
 |--------|--------|-------------|-----------|
-| 🟢 **Slime** | Slow | Fireball | Basic ranged shooter |
-| 🐍 **Snake** | Medium | Melee | Pursues player directly |
-| 🦇 **Bat** | Fast | Fireball | Chaotic, high-speed ranged attacker |
-| 🔴 **Boss** | Very Fast | None | Spawns after 7 rooms; initiates battle freeze |
+| **Slime** | Slow | Fireball | Basic ranged shooter |
+| **Snake** | Medium | Melee | Pursues player directly |
+| **Bat** | Fast | Fireball | Chaotic, high-speed ranged attacker |
+| **Boss** | Very Fast | None | Spawns after 7 rooms; initiates battle freeze |
 
 Unfortunately, we were unable to implement additional mobs due to time constraint but we hope to add these additional mobs in the future. 
 
@@ -110,7 +110,7 @@ Enemies have independent cooldowns and simple AI logic:
 
 ---
 
-## 🔥 Projectile System
+## Projectile System
 
 All projectiles (arrows and fireballs) are stored and updated per frame.
 
@@ -132,7 +132,7 @@ gg.fillOval(x, y, 8, 8);
 
 ---
 
-## 🧱 Collision & Movement
+## Collision & Movement
 
 Collision detection uses simple rectangle intersection checks (`java.awt.Rectangle`).  
 Movement vectors are normalized to maintain consistent speed in all directions.
@@ -145,7 +145,7 @@ This ensures fair and accurate physics without complex engines.
 
 ---
 
-## 💾 Persistence & Progression
+## Persistence & Progression
 
 - **Rooms are saved** in a `HashMap` to ensure persistence between visits.  
 - **Keys, bows, and arrows** carry over between rooms.  
@@ -156,7 +156,7 @@ This structure allows infinite replay and progressive difficulty scaling.
 
 ---
 
-## 💀 Game Over & Restart System
+## Game Over & Restart System
 
 When the player’s HP reaches 0:
 - The game pauses and displays a message:  
@@ -166,7 +166,7 @@ When the player’s HP reaches 0:
 
 ---
 
-## 🧠 Architecture Diagram
+## Architecture Diagram
 
 ```plaintext
 ZeldaRooms.java
@@ -191,7 +191,7 @@ Enemy.java
 
 ---
 
-## 🧩 Data Structures Used
+## Data Structures Used
 
 | Data Type | Purpose |
 |------------|----------|
@@ -203,33 +203,33 @@ Enemy.java
 
 ---
 
-## ✅ Core Features
+## Core Features
 
-- 🌀 Procedurally generated dungeon rooms  
-- ⚔️ Real-time sword and bow combat  
-- 👾 Multiple enemy AI patterns  
-- 🧱 Dynamic obstacles and keys  
-- 💀 Boss encounter system  
-- 🔁 Persistent world memory  
-- 🧍 Game Over + Restart loop  
-- 💡 Glowing projectile effects  
+- Procedurally generated dungeon rooms  
+- Real-time sword and bow combat  
+- Multiple enemy AI patterns  
+- Dynamic obstacles and keys  
+- Boss encounter system  
+- Persistent world memory  
+- Game Over + Restart loop  
+- Glowing projectile effects  
 
 ---
 
-## 🚀 Future Roadmap
+## Future Roadmap
 
 | Feature | Description |
 |----------|-------------|
-| 🧱 Sprite Integration | Replace shapes with proper character & tile art |
-| 🎵 Sound System | Add music, sword swings, and hit sounds |
-| ⚔️ Turn-Based Boss Battles | Pokémon-style fight system for bosses |
-| 💾 Save System | Add persistent saves and profiles |
-| 🧍 Co-op Mode | Local two-player support |
-| 🧭 UI Upgrade | Health bars, inventory screen, and minimap |
+| Sprite Integration | Replace shapes with proper character & tile art |
+| Sound System | Add music, sword swings, and hit sounds |
+| Turn-Based Boss Battles | Pokémon-style fight system for bosses |
+| Save System | Add persistent saves and profiles |
+| Co-op Mode | Local two-player support |
+| UI Upgrade | Health bars, inventory screen, and minimap |
 
 ---
 
-## 🧠 Lessons Learned
+## Lessons Learned
 
 - Procedural generation improves replayability but complicates debugging.  
 - AI tuning is critical for fair, engaging combat.  
@@ -238,7 +238,7 @@ Enemy.java
 
 ---
 
-## 🏁 Conclusion
+## Conclusion
 
 **The Legend of Aetheria** is proof that a complete dungeon-crawling experience can be built entirely in Java — with no game engine, just code.  
 It captures retro aesthetics, procedural depth, and action gameplay within a self-contained system.  
@@ -247,7 +247,7 @@ This project serves as a foundation for future extensions into textured graphics
 
 ---
 
-## 🧱 Built With
+## Built With
 
 | Tool | Purpose |
 |------|----------|
@@ -258,20 +258,12 @@ This project serves as a foundation for future extensions into textured graphics
 
 ---
 
-## 👨‍💻 Developer
+## Developer
 
 **Created by:**  
-**Pritam Gurung**  
+**Pritam, Esran, Jaleel, and Ola**  
 *Computer Science Student, University of Nottingham*  
 Hackathon 2025 Project — *Retro Java Dungeon Adventure*
 
 ---
 
-## 📜 License
-
-This project is released under the [MIT License](LICENSE).  
-You’re free to use, modify, and build upon this project — just credit the original creator.
-
----
-
-> _“Every door leads to discovery — and sometimes danger.”_
