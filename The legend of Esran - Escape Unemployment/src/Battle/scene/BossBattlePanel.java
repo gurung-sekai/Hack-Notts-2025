@@ -63,7 +63,8 @@ public class BossBattlePanel extends JPanel {
         setBackground(Color.BLACK);
         setFocusable(true);
 
-        this.engine = new BattleEngine(heroDef.toFighter(), bossDef.toFighter(), onEnd);
+        int initialMomentum = Math.max(-2, Math.min(2, heroDef.openingMomentum - bossDef.momentumEdge));
+        this.engine = new BattleEngine(heroDef.toFighter(), bossDef.toFighter(), initialMomentum, onEnd);
         this.heroVisual = new FighterVisual(engine.hero, heroDef.spritePrefix, 140, 260, 3.0);
         this.bossVisual = new FighterVisual(engine.boss, bossDef.spritePrefix, 540, 140, bossDef.scale);
         this.floorTile = loadImage("/resources/tiles/floor/floor_5.png");
@@ -483,36 +484,38 @@ public class BossBattlePanel extends JPanel {
     // ---------------------------------------------------------------------
     // Hero / Boss definitions
     // ---------------------------------------------------------------------
-    private record HeroDefinition(String name, Affinity affinity, Stats stats, String spritePrefix) {
+    private record HeroDefinition(String name, Affinity affinity, Stats stats, String spritePrefix,
+                                  double offenseMod, double defenseMod, int openingMomentum) {
         Fighter toFighter() {
-            return new Fighter(name, affinity, stats.copy());
+            return new Fighter(name, affinity, stats.copy(), offenseMod, defenseMod);
         }
 
         static HeroDefinition defaultHero() {
-            return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(160, 24, 16, 14),
-                    "/resources/sprites/Knight/Idle/knight_m_idle_anim_f");
+            return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(200, 26, 18, 16),
+                    "/resources/sprites/Knight/Idle/knight_m_idle_anim_f", 1.08, 1.12, 1);
         }
     }
 
-    private record BossDefinition(String displayName, Affinity affinity, Stats stats, String spritePrefix, double scale) {
+    private record BossDefinition(String displayName, Affinity affinity, Stats stats, String spritePrefix, double scale,
+                                  double offenseMod, double defenseMod, int momentumEdge) {
         Fighter toFighter() {
-            return new Fighter(displayName, affinity, stats.copy());
+            return new Fighter(displayName, affinity, stats.copy(), offenseMod, defenseMod);
         }
 
         static BossDefinition of(BossKind kind) {
             return switch (kind) {
                 case OGRE_WARLORD -> new BossDefinition("Ogre Warlord", Affinity.STONE,
-                        new Stats(210, 22, 18, 10), "/resources/sprites/Ogre/ogre_idle_anim_f", 3.5);
+                        new Stats(220, 22, 16, 12), "/resources/sprites/Ogre/ogre_idle_anim_f", 3.5, 1.04, 1.0, 1);
                 case SKELETON_LORD -> new BossDefinition("Skeleton Lord", Affinity.VERDANT,
-                        new Stats(190, 20, 14, 16), "/resources/sprites/Skeleton/skelet_idle_anim_f", 3.3);
+                        new Stats(180, 19, 13, 20), "/resources/sprites/Skeleton/skelet_idle_anim_f", 3.3, 0.95, 0.9, 0);
                 case PUMPKIN_KING -> new BossDefinition("Pumpkin King", Affinity.EMBER,
-                        new Stats(200, 21, 15, 15), "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 3.4);
+                        new Stats(205, 20, 18, 14), "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 3.4, 1.0, 1.05, 0);
                 case IMP_OVERLORD -> new BossDefinition("Imp Overlord", Affinity.STORM,
-                        new Stats(175, 18, 12, 18), "/resources/sprites/Imp/imp_idle_anim_f", 3.6);
+                        new Stats(175, 21, 12, 22), "/resources/sprites/Imp/imp_idle_anim_f", 3.6, 1.02, 0.88, 0);
                 case WIZARD_ARCHON -> new BossDefinition("Wizard Archon", Affinity.STORM,
-                        new Stats(185, 24, 12, 17), "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 3.6);
+                        new Stats(190, 24, 13, 18), "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 3.6, 1.05, 0.92, 1);
                 case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
-                        new Stats(230, 20, 20, 8), "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 3.8);
+                        new Stats(260, 18, 22, 8), "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 3.8, 0.9, 1.15, -1);
             };
         }
     }
@@ -524,13 +527,15 @@ public class BossBattlePanel extends JPanel {
         private final Fighter hero;
         private final Fighter boss;
         private final Consumer<Outcome> onEnd;
-        private int momentum = 0;
+        private int momentum;
         private boolean over = false;
+        private boolean heroSecondWindAvailable = true;
 
-        private BattleEngine(Fighter hero, Fighter boss, Consumer<Outcome> onEnd) {
+        private BattleEngine(Fighter hero, Fighter boss, int initialMomentum, Consumer<Outcome> onEnd) {
             this.hero = hero;
             this.boss = boss;
             this.onEnd = onEnd;
+            this.momentum = Math.max(-2, Math.min(2, initialMomentum));
         }
 
         RoundOutcome resolve(int heroIndex) {
@@ -674,6 +679,22 @@ public class BossBattlePanel extends JPanel {
                 fighter.status = Status.OK;
                 out.messages.add(fighter.name + " recovers from shock.");
                 out.events.add(Event.status(fighter, "Recovered"));
+            }
+            if (fighter == hero && heroSecondWindAvailable && fighter.hp > 0) {
+                int threshold = (int) Math.ceil(fighter.base.hp * 0.35);
+                if (fighter.hp <= threshold) {
+                    heroSecondWindAvailable = false;
+                    int before = fighter.hp;
+                    int heal = Math.max(15, fighter.base.hp / 5);
+                    fighter.hp = Math.min(fighter.base.hp, fighter.hp + heal);
+                    fighter.base.guard += 1;
+                    int healed = fighter.hp - before;
+                    out.messages.add(fighter.name + " rallies with a second wind!");
+                    if (healed > 0) {
+                        out.events.add(Event.heal(fighter, fighter, healed));
+                    }
+                    out.events.add(Event.guard(fighter, "Guard ↑"));
+                }
             }
             List<Technique> cooldowns = new ArrayList<>(fighter.cd.keySet());
             for (Technique t : cooldowns) {

@@ -41,3 +41,27 @@ sourceSets {
                 '--add-modules', 'javafx.controls'
     }
 }
+
+tasks.withType(JavaCompile).configureEach {
+    options.incremental = false
+    doFirst {
+        def dir = destinationDirectory.get().asFile
+        if (dir.exists()) {
+            def attempts = 0
+            def cleared = false
+            while (!cleared && attempts < 5) {
+                attempts++
+                project.delete(dir)
+                cleared = !dir.exists()
+                if (!cleared) {
+                    logger.warn("Attempt ${attempts} to clear stale classes in ${dir} is still pending; retrying...")
+                    System.gc()
+                    sleep(150)
+                }
+            }
+            if (!cleared) {
+                logger.warn("Proceeding with existing compiled classes under ${dir} after repeated cleanup attempts.")
+            }
+        }
+    }
+}

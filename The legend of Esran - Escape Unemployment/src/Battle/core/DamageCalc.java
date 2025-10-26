@@ -15,11 +15,15 @@ public class DamageCalc {
     //  momentum: attacker’s perspective (−3..+3). We cap to keep numbers sane.
     public static Result compute (Fighter atk, Fighter def, Technique t, int momentum) {
         if(t.isUtility())return new Result(0,1.0,false);
-        int A=atk.base.power, G=def.base.guard;
+        double A = atk.base.power * atk.offenseMod;
+        double G = def.base.guard;
 
         //small status tweaks
-        if(def.status== Status.ROOTED)G=(int)(G*0.9);
-        if(def.status== Status.IGNITED && t.affinity== Affinity.EMBER)A=(int)(A*1.2);
+        if(def.status== Status.ROOTED)G=(G*0.9);
+        if(def.status== Status.IGNITED && t.affinity== Affinity.EMBER)A=(A*1.2);
+
+        double tunedGuard = (G + 10.0) * Math.max(0.6, def.defenseMod);
+        double tunedPower = A;
 
         boolean crit= Rng.d01()<0.10; // 10% crit
         double critMod=crit?1.4:1.0;
@@ -28,7 +32,7 @@ public class DamageCalc {
         double rand=0.90+ Rng.d01()*0.20; //0.90..1.10
 
         //smooth division by adding a constant to guard
-        double base = t.power*(A/Math.max(1.0,(G+10.0)));
+        double base = t.power*(tunedPower/Math.max(1.0,tunedGuard));
         int dmg = (int)Math.max(1,Math.floor(base*aff*mom*critMod*rand));
         return new Result(dmg,aff,crit);
     }
