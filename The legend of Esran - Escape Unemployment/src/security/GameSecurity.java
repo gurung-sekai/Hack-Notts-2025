@@ -32,8 +32,8 @@ public final class GameSecurity {
 
     static {
         Map<Path, String> hashes = new LinkedHashMap<>();
-        hashes.put(Path.of("src", "World", "ZeldaRooms.java"),
-                "186e8aa272c30f2977fa5fafe9603e4cf59a84581dffb9230f4be6c196d2d8a6");
+        hashes.put(Path.of("src", "World", "DungeonRooms.java"),
+                "b5bf31175fffca5df924f40ea1e1c9fcc3f1cacd8d93fcd18e1a84723b23590e");
         hashes.put(Path.of("src", "Battle", "scene", "BossBattlePanel.java"),
                 "494e3898875792aed2f2535e587d39063d92fca3c6dff2514309ff8a31da8944");
         EXPECTED_HASHES = Collections.unmodifiableMap(hashes);

@@ -38,7 +38,7 @@ public class DungeonMap extends JPanel {
     private T[][] grid;
     private List<Room> rooms;
 
-    // Somewhere in ZeldaRooms when you detect a boss tile or key press:
+    // Somewhere in DungeonRooms when you detect a boss tile or key press:
     private void startBossBattle() {
         Fighter hero = new Fighter("King's Guardian", Battle.domain.Affinity.STONE, new Battle.domain.Stats(120,18,18,14));
         Fighter boss = new Fighter("Arch Druid", Battle.domain.Affinity.VERDANT, new Battle.domain.Stats(140,22,16,14));

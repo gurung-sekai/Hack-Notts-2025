@@ -1,6 +1,7 @@
 package fx;
 
 import util.ResourceLoader;
+import util.SpriteSheetSlicer;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -48,6 +49,26 @@ public class FrameAnim {
             for (int c = 0; c < cols; c++)
                 arr[idx++] = sheet.getSubimage(c * w, r * h, w, h);
         return new FrameAnim(arr, fps, loop);
+    }
+
+    /** Build an animation directly from frames. */
+    public static FrameAnim fromFrames(BufferedImage[] frames, double fps, boolean loop) {
+        return new FrameAnim(frames.clone(), fps, loop);
+    }
+
+    /** Slice a sheet with irregular spacing using {@link SpriteSheetSlicer}. */
+    public static FrameAnim fromIrregularSheet(String resourcePath, double fps, boolean loop) {
+        return fromIrregularSheet(resourcePath, SpriteSheetSlicer.Options.DEFAULT, fps, loop);
+    }
+
+    /** Slice a sheet with irregular spacing using {@link SpriteSheetSlicer}. */
+    public static FrameAnim fromIrregularSheet(String resourcePath, SpriteSheetSlicer.Options options, double fps, boolean loop) {
+        try {
+            BufferedImage[] frames = SpriteSheetSlicer.slice(resourcePath, options);
+            return fromFrames(frames, fps, loop);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to slice sheet: " + resourcePath, e);
+        }
     }
 
     public void update(double dt) {
