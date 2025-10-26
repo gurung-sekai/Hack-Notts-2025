@@ -1,32 +1,43 @@
 plugins {
     id 'application'
-    id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
 repositories {
     mavenCentral()
 }
 
-javafx {
-    version = '23.0.1'                 // works great with JDK 21 or 23
-    modules = [ 'javafx.controls' ]    // add 'javafx.fxml' later if you use FXML
+def javaFxLibDir = file("${rootProject.projectDir}/../javafx-sdk-21.0.2/lib")
+
+dependencies {
+    implementation fileTree(dir: javaFxLibDir, include: ['*.jar'])
 }
 
 application {
-    mainClass = 'Battle.fx.FxMain'     // package + class of your JavaFX app
+    mainClass = 'Battle.fx.FxMain'
+    applicationDefaultJvmArgs = [
+            '--module-path', javaFxLibDir.absolutePath,
+            '--add-modules', 'javafx.controls'
+    ]
 }
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)  // or 23 if that’s your JDK
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
-/* Your sources are under src/ (not src/main/java) */
 sourceSets {
     main {
         java {
             srcDirs = ['src']
         }
+    }
+}
+
+// Ensure all Java executions (run, test) see the JavaFX modules.
+[JavaExec, Test].each { taskType ->
+    tasks.withType(taskType).configureEach {
+        jvmArgs '--module-path', javaFxLibDir.absolutePath,
+                '--add-modules', 'javafx.controls'
     }
 }
