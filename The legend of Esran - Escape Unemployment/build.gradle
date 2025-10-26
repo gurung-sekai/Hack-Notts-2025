@@ -90,8 +90,10 @@ tasks.withType(JavaCompile).configureEach { task ->
     }
 
     if (isWindowsHost) {
-        staleHeaderDirectories << originalHeaderDir
-        task.outputs.doNotTrackState("Avoid Gradle stale output cleanup on Windows when JNI headers live outside the project.")
+        if (originalHeaderDir != null) {
+            staleHeaderDirectories << originalHeaderDir
+        }
+        task.doNotTrackState("Avoid Gradle stale output cleanup on Windows when JNI headers live outside the project.")
     }
 }
 
