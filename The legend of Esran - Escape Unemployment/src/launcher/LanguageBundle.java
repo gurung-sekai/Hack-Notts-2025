@@ -37,6 +37,7 @@ public final class LanguageBundle {
         en.put("key_obtained", "You pocket a cavern key! Keys: %d");
         en.put("boss_challenge", "Guardian challenge: %s");
         en.put("victory_key", "Guardian bested! Keys: %d");
+        en.put("victory_heal", "Guardian bested! Keys: %d — your wounds mend (HP restored to %d).");
         en.put("respawn", "You gather your breath at the entrance. The caverns still await!");
         en.put("boss_repelled", "The guardian drove you back! Regroup at the entrance.");
         en.put("door_locked", "The door is sealed. A key is required.");
@@ -65,6 +66,7 @@ public final class LanguageBundle {
         cy.put("key_obtained", "Rydych yn codi allwedd ogof! Allweddi: %d");
         cy.put("boss_challenge", "Her gwarcheidwad: %s");
         cy.put("victory_key", "Gorchfygiad gwarcheidwad! Allweddi: %d");
+        cy.put("victory_heal", "Gorchfygwyd y gwarcheidwad! Allweddi: %d — rydych yn gwella (HP wedi'i adfer i %d).");
         cy.put("respawn", "Rydych yn ymgynnull wrth y fynedfa. Mae'r ogofeydd yn disgwyl!");
         cy.put("boss_repelled", "Gorfododd y gwarcheidwad chi'n ôl! Ail-drefnwch wrth y fynedfa.");
         cy.put("door_locked", "Mae'r drws wedi'i selio. Mae angen allwedd.");
