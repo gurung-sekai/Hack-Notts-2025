@@ -7,7 +7,6 @@ import Battle.util.Rng;
 import fx.Effect;
 import fx.FXLibrary;
 import gfx.AnimatedSprite;
-import gfx.SpriteSheetSlicer;
 
 import javax.swing.*;
 import java.awt.*;
@@ -21,7 +20,6 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 import util.ResourceLoader;
-import util.SpriteSheetSlicer;
 
 /**
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
@@ -594,7 +592,7 @@ public class BossBattlePanel extends JPanel {
 
     private static SpriteSource sheetSource(String resourcePath) {
         Objects.requireNonNull(resourcePath, "resourcePath");
-        return sprite -> sprite.add(AnimatedSprite.State.IDLE, SpriteSheetSlicer.sliceFromResource(resourcePath));
+        return sprite -> sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath);
     }
 
     // ---------------------------------------------------------------------

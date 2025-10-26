@@ -68,8 +68,23 @@ sourceSets {
     }
 }
 
-tasks.withType(JavaCompile).configureEach {
+tasks.withType(JavaCompile).configureEach { task ->
     options.incremental = false
+
+    // Gradle defaults JNI header generation to build/generated/sources/headers/java/<sourceSet>,
+    // which lives inside the OneDrive-synced project directory for Windows users. OneDrive tends
+    // to lock those files, and Gradle fails the build when it cannot delete the directory during
+    // stale output cleanup. Point the headers at the system temp directory instead so the cleanup
+    // happens outside of OneDrive's control.
+    def tempHeaderRoot = new File(System.getProperty('java.io.tmpdir'),
+            "hacknotts-headers/${project.name}/${task.name}")
+    options.headerOutputDirectory = tempHeaderRoot
+
+    doLast {
+        if (tempHeaderRoot.exists()) {
+            tempHeaderRoot.deleteDir()
+        }
+    }
 }
 
 if (!isWindowsHost) {
