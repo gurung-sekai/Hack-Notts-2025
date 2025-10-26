@@ -2,11 +2,13 @@ package util;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Utility that slices irregular sprite sheets into individual frames without persisting binaries to the repo.
@@ -18,25 +20,34 @@ import java.util.Objects;
 public final class SpriteSheetSlicer {
 
     /** Immutable configuration for a slicing run. */
-    public record Options(int backgroundTolerance, int alphaThreshold, int padding, int minFrameArea) {
-        public static final Options DEFAULT = new Options(48, 8, 2, 160);
+    public record Options(int backgroundTolerance,
+                          int alphaThreshold,
+                          int padding,
+                          int minFrameArea,
+                          int joinGap,
+                          int haloPasses) {
+        public static final Options DEFAULT = new Options(64, 24, 2, 120, 1, 1);
 
         public Options {
             if (backgroundTolerance < 0) throw new IllegalArgumentException("backgroundTolerance must be >= 0");
             if (alphaThreshold < 0 || alphaThreshold > 255) throw new IllegalArgumentException("alphaThreshold 0-255");
             if (padding < 0) throw new IllegalArgumentException("padding must be >= 0");
             if (minFrameArea < 1) throw new IllegalArgumentException("minFrameArea must be >= 1");
+            if (joinGap < 0) throw new IllegalArgumentException("joinGap must be >= 0");
+            if (haloPasses < 0) throw new IllegalArgumentException("haloPasses must be >= 0");
         }
 
-        public Options withPadding(int padding) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea); }
-        public Options withTolerance(int tolerance) { return new Options(tolerance, alphaThreshold, padding, minFrameArea); }
-        public Options withAlphaThreshold(int threshold) { return new Options(backgroundTolerance, threshold, padding, minFrameArea); }
-        public Options withMinFrameArea(int area) { return new Options(backgroundTolerance, alphaThreshold, padding, area); }
+        public Options withPadding(int padding) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, joinGap, haloPasses); }
+        public Options withTolerance(int tolerance) { return new Options(tolerance, alphaThreshold, padding, minFrameArea, joinGap, haloPasses); }
+        public Options withAlphaThreshold(int threshold) { return new Options(backgroundTolerance, threshold, padding, minFrameArea, joinGap, haloPasses); }
+        public Options withMinFrameArea(int area) { return new Options(backgroundTolerance, alphaThreshold, padding, area, joinGap, haloPasses); }
+        public Options withJoinGap(int gap) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, gap, haloPasses); }
+        public Options withHaloPasses(int passes) { return new Options(backgroundTolerance, alphaThreshold, padding, minFrameArea, joinGap, passes); }
     }
 
     private record CacheKey(String resourcePath, Options options) {}
 
-    private static final Map<CacheKey, BufferedImage[]> CACHE = new HashMap<>();
+    private static final Map<CacheKey, BufferedImage[]> CACHE = new ConcurrentHashMap<>();
 
     private SpriteSheetSlicer() { }
 
@@ -53,7 +64,7 @@ public final class SpriteSheetSlicer {
         BufferedImage[] frames = (atlas != null)
                 ? sliceFromAtlas(sheet, atlas, opts)
                 : autoSlice(sheet, opts);
-        CACHE.put(key, frames);
+        CACHE.put(key, frames.clone());
         return frames.clone();
     }
 
@@ -68,91 +79,36 @@ public final class SpriteSheetSlicer {
             return new BufferedImage[0];
         }
 
-        int[] cleaned = clean.pixels();
-        int[] colCounts = clean.colCounts().clone();
-        boolean[] blankCol = new boolean[width];
-        for (int x = 0; x < width; x++) blankCol[x] = colCounts[x] == 0;
-
-        record FrameCandidate(int left, int top, BufferedImage image) {}
-
-        List<FrameCandidate> frames = new ArrayList<>();
-        for (int x = 0; x < width; ) {
-            while (x < width && blankCol[x]) x++;
-            if (x >= width) break;
-            int x2 = x;
-            while (x2 < width && !blankCol[x2]) x2++;
-
-            int[] segmentRowCounts = new int[height];
-            for (int xx = x; xx < x2; xx++) {
-                int base = xx;
-                for (int yy = 0; yy < height; yy++) {
-                    if ((cleaned[yy * width + base] >>> 24) != 0) {
-                        segmentRowCounts[yy]++;
-                    }
-                }
-            }
-
-            for (int y = 0; y < height; ) {
-                while (y < height && segmentRowCounts[y] == 0) y++;
-                if (y >= height) break;
-                int y2 = y;
-                while (y2 < height && segmentRowCounts[y2] != 0) y2++;
-
-                // Tighten bounds to actual content
-                int minX = x2, maxX = x - 1, minY = y2, maxY = y - 1;
-                for (int yy = y; yy < y2; yy++) {
-                    int rowIdx = yy * width;
-                    for (int xx = x; xx < x2; xx++) {
-                        int argb = cleaned[rowIdx + xx];
-                        if ((argb >>> 24) != 0) {
-                            if (xx < minX) minX = xx;
-                            if (xx > maxX) maxX = xx;
-                            if (yy < minY) minY = yy;
-                            if (yy > maxY) maxY = yy;
-                        }
-                    }
-                }
-
-                if (maxX >= minX && maxY >= minY) {
-                    int pad = opts.padding();
-                    minX = Math.max(x, minX - pad);
-                    minY = Math.max(y, minY - pad);
-                    maxX = Math.min(x2 - 1, maxX + pad);
-                    maxY = Math.min(y2 - 1, maxY + pad);
-
-                    int frameW = maxX - minX + 1;
-                    int frameH = maxY - minY + 1;
-                    if (frameW * frameH >= opts.minFrameArea()) {
-                        BufferedImage frame = new BufferedImage(frameW, frameH, BufferedImage.TYPE_INT_ARGB);
-                        int[] out = new int[frameW * frameH];
-                        for (int yy = 0; yy < frameH; yy++) {
-                            int srcPos = (minY + yy) * width + minX;
-                            System.arraycopy(cleaned, srcPos, out, yy * frameW, frameW);
-                        }
-                        frame.setRGB(0, 0, frameW, frameH, out, 0, frameW);
-                        frames.add(new FrameCandidate(minX, minY, frame));
-                    }
-                }
-                y = y2;
-            }
-            x = x2;
-        }
-
-        if (frames.isEmpty()) {
+        List<FrameBounds> rawFrames = findFrames(clean, opts);
+        if (rawFrames.isEmpty()) {
             BufferedImage copy = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-            copy.setRGB(0, 0, width, height, cleaned, 0, width);
+            copy.setRGB(0, 0, width, height, clean.pixels(), 0, width);
             return new BufferedImage[]{copy};
         }
 
+        List<FrameBounds> frames = mergeBounds(rawFrames, opts);
         frames.sort((a, b) -> {
-            int cmp = Integer.compare(a.top(), b.top());
-            if (cmp == 0) cmp = Integer.compare(a.left(), b.left());
+            int cmp = Integer.compare(a.minY(), b.minY());
+            if (cmp == 0) {
+                cmp = Integer.compare(a.minX(), b.minX());
+            }
             return cmp;
         });
 
         BufferedImage[] arr = new BufferedImage[frames.size()];
+        int[] cleaned = clean.pixels();
         for (int i = 0; i < frames.size(); i++) {
-            arr[i] = frames.get(i).image();
+            FrameBounds boundsWithPadding = frames.get(i).expand(opts.padding(), width, height);
+            int frameW = boundsWithPadding.width();
+            int frameH = boundsWithPadding.height();
+            BufferedImage frame = new BufferedImage(frameW, frameH, BufferedImage.TYPE_INT_ARGB);
+            int[] out = new int[frameW * frameH];
+            for (int row = 0; row < frameH; row++) {
+                int srcPos = (boundsWithPadding.minY() + row) * width + boundsWithPadding.minX();
+                System.arraycopy(cleaned, srcPos, out, row * frameW, frameW);
+            }
+            frame.setRGB(0, 0, frameW, frameH, out, 0, frameW);
+            arr[i] = frame;
         }
         return arr;
     }
@@ -160,14 +116,15 @@ public final class SpriteSheetSlicer {
     private static BufferedImage[] sliceFromAtlas(BufferedImage sheet, int[][] atlas, Options opts) {
         CleanSheet clean = cleanSheet(sheet, opts);
         int width = clean.width();
+        int height = clean.height();
         int[] pixels = clean.pixels();
         BufferedImage[] frames = new BufferedImage[atlas.length];
         for (int i = 0; i < atlas.length; i++) {
             int[] rect = atlas[i];
             int x = Math.max(0, Math.min(width - 1, rect[0]));
-            int y = Math.max(0, Math.min(clean.height() - 1, rect[1]));
+            int y = Math.max(0, Math.min(height - 1, rect[1]));
             int w = Math.max(1, Math.min(rect[2], width - x));
-            int h = Math.max(1, Math.min(rect[3], clean.height() - y));
+            int h = Math.max(1, Math.min(rect[3], height - y));
             BufferedImage frame = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
             int[] out = new int[w * h];
             for (int row = 0; row < h; row++) {
@@ -184,71 +141,446 @@ public final class SpriteSheetSlicer {
         int width = sheet.getWidth();
         int height = sheet.getHeight();
         if (width <= 0 || height <= 0) {
-            return new CleanSheet(width, height, new int[0], new int[0]);
+            return new CleanSheet(width, height, new int[0]);
         }
 
         int[] src = sheet.getRGB(0, 0, width, height, null, 0, width);
         int background = estimateBackground(src, width, height);
-        int tolSq = opts.backgroundTolerance() * opts.backgroundTolerance();
+        boolean[] backgroundMask = floodBackground(src, width, height, background, opts);
+        int[] cleaned = Arrays.copyOf(src, src.length);
 
-        int[] cleaned = new int[src.length];
-        int[] colCounts = new int[width];
-
-        for (int y = 0; y < height; y++) {
-            int rowIndex = y * width;
-            for (int x = 0; x < width; x++) {
-                int idx = rowIndex + x;
-                int argb = src[idx];
-                int alpha = (argb >>> 24) & 0xFF;
-                if (alpha <= opts.alphaThreshold()) {
-                    cleaned[idx] = 0;
-                    continue;
-                }
-                int rgb = argb & 0x00FFFFFF;
-                if (colourDistanceSq(rgb, background) <= tolSq) {
-                    cleaned[idx] = 0;
-                    continue;
-                }
-                cleaned[idx] = argb;
-                if (((argb >>> 24) & 0xFF) == 0) {
-                    cleaned[idx] = argb | 0xFF000000;
-                }
-                colCounts[x]++;
+        for (int i = 0; i < cleaned.length; i++) {
+            int argb = cleaned[i];
+            int alpha = (argb >>> 24) & 0xFF;
+            if (backgroundMask[i] || alpha <= opts.alphaThreshold()) {
+                cleaned[i] = 0;
+            } else if (alpha < 255) {
+                cleaned[i] = argb | 0xFF000000;
             }
         }
 
-        return new CleanSheet(width, height, cleaned, colCounts);
+        if (opts.haloPasses() > 0) {
+            peelHalos(cleaned, backgroundMask, width, height, background, opts);
+        }
+
+        return new CleanSheet(width, height, cleaned);
     }
 
-    private record CleanSheet(int width, int height, int[] pixels, int[] colCounts) {}
+    private static boolean[] floodBackground(int[] src, int width, int height, int backgroundRgb, Options opts) {
+        int tolSq = opts.backgroundTolerance() * opts.backgroundTolerance();
+        boolean[] mask = new boolean[src.length];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+
+        for (int x = 0; x < width; x++) {
+            enqueueIfBackground(queue, mask, src, width, height, x, 0, backgroundRgb, tolSq, opts.alphaThreshold());
+            enqueueIfBackground(queue, mask, src, width, height, x, height - 1, backgroundRgb, tolSq, opts.alphaThreshold());
+        }
+        for (int y = 0; y < height; y++) {
+            enqueueIfBackground(queue, mask, src, width, height, 0, y, backgroundRgb, tolSq, opts.alphaThreshold());
+            enqueueIfBackground(queue, mask, src, width, height, width - 1, y, backgroundRgb, tolSq, opts.alphaThreshold());
+        }
+
+        while (!queue.isEmpty()) {
+            int idx = queue.removeFirst();
+            int cx = idx % width;
+            int cy = idx / width;
+            if (cx > 0) enqueueIfBackground(queue, mask, src, width, height, cx - 1, cy, backgroundRgb, tolSq, opts.alphaThreshold());
+            if (cx + 1 < width) enqueueIfBackground(queue, mask, src, width, height, cx + 1, cy, backgroundRgb, tolSq, opts.alphaThreshold());
+            if (cy > 0) enqueueIfBackground(queue, mask, src, width, height, cx, cy - 1, backgroundRgb, tolSq, opts.alphaThreshold());
+            if (cy + 1 < height) enqueueIfBackground(queue, mask, src, width, height, cx, cy + 1, backgroundRgb, tolSq, opts.alphaThreshold());
+        }
+        return mask;
+    }
+
+    private static void enqueueIfBackground(ArrayDeque<Integer> queue,
+                                            boolean[] mask,
+                                            int[] src,
+                                            int width,
+                                            int height,
+                                            int x,
+                                            int y,
+                                            int backgroundRgb,
+                                            int tolSq,
+                                            int alphaThreshold) {
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+            return;
+        }
+        int idx = y * width + x;
+        if (mask[idx]) {
+            return;
+        }
+        int argb = src[idx];
+        if (isBackgroundPixel(argb, backgroundRgb, tolSq, alphaThreshold)) {
+            mask[idx] = true;
+            queue.add(idx);
+        }
+    }
+
+    private static void peelHalos(int[] cleaned,
+                                  boolean[] backgroundMask,
+                                  int width,
+                                  int height,
+                                  int backgroundRgb,
+                                  Options opts) {
+        int tolSq = opts.backgroundTolerance() * opts.backgroundTolerance();
+        int passes = Math.max(1, opts.haloPasses());
+        for (int pass = 0; pass < passes; pass++) {
+            boolean changed = false;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int idx = y * width + x;
+                    if (backgroundMask[idx]) {
+                        continue;
+                    }
+                    int argb = cleaned[idx];
+                    if ((argb >>> 24) == 0) {
+                        backgroundMask[idx] = true;
+                        continue;
+                    }
+                    int rgb = argb & 0x00FFFFFF;
+                    if (colourDistanceSq(rgb, backgroundRgb) > tolSq) {
+                        continue;
+                    }
+                    if (!touchesBackground(backgroundMask, width, height, x, y)) {
+                        continue;
+                    }
+                    if (touchesStrongColour(cleaned, backgroundMask, width, height, x, y, tolSq, backgroundRgb)) {
+                        continue;
+                    }
+                    if (countOpaqueNeighbours(cleaned, backgroundMask, width, height, x, y) >= 5) {
+                        continue;
+                    }
+                    cleaned[idx] = 0;
+                    backgroundMask[idx] = true;
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+    }
+
+    private static boolean touchesBackground(boolean[] backgroundMask,
+                                             int width,
+                                             int height,
+                                             int x,
+                                             int y) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                if (backgroundMask[ny * width + nx]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int countOpaqueNeighbours(int[] cleaned,
+                                             boolean[] backgroundMask,
+                                             int width,
+                                             int height,
+                                             int x,
+                                             int y) {
+        int count = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                int idx = ny * width + nx;
+                if (backgroundMask[idx]) continue;
+                int argb = cleaned[idx];
+                if ((argb >>> 24) != 0) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static boolean touchesStrongColour(int[] cleaned,
+                                               boolean[] backgroundMask,
+                                               int width,
+                                               int height,
+                                               int x,
+                                               int y,
+                                               int tolSq,
+                                               int backgroundRgb) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                int nIdx = ny * width + nx;
+                if (backgroundMask[nIdx]) continue;
+                int argb = cleaned[nIdx];
+                if ((argb >>> 24) == 0) continue;
+                int rgb = argb & 0x00FFFFFF;
+                if (colourDistanceSq(rgb, backgroundRgb) > tolSq) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isBackgroundPixel(int argb, int backgroundRgb, int tolSq, int alphaThreshold) {
+        int alpha = (argb >>> 24) & 0xFF;
+        if (alpha <= alphaThreshold) {
+            return true;
+        }
+        if (alpha == 0) {
+            return true;
+        }
+        int rgb = argb & 0x00FFFFFF;
+        int dist = colourDistanceSq(rgb, backgroundRgb);
+        if (dist <= tolSq) {
+            return true;
+        }
+        if (isLowSaturation(rgb) && dist <= tolSq * 4L) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isLowSaturation(int rgb) {
+        int r = (rgb >>> 16) & 0xFF;
+        int g = (rgb >>> 8) & 0xFF;
+        int b = rgb & 0xFF;
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        if (max == 0) {
+            return true;
+        }
+        int sat = (max - min) * 255 / max;
+        return sat < 28;
+    }
+
+    private static List<FrameBounds> findFrames(CleanSheet clean, Options opts) {
+        int width = clean.width();
+        int height = clean.height();
+        int[] pixels = clean.pixels();
+        boolean[] visited = new boolean[pixels.length];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        List<FrameBounds> frames = new ArrayList<>();
+
+        for (int idx = 0; idx < pixels.length; idx++) {
+            if (visited[idx]) {
+                continue;
+            }
+            visited[idx] = true;
+            if ((pixels[idx] >>> 24) == 0) {
+                continue;
+            }
+
+            queue.clear();
+            queue.add(idx);
+
+            int minX = width, minY = height, maxX = -1, maxY = -1;
+            int pixelCount = 0;
+
+            while (!queue.isEmpty()) {
+                int current = queue.removeFirst();
+                int cx = current % width;
+                int cy = current / width;
+
+                if (cx < minX) minX = cx;
+                if (cy < minY) minY = cy;
+                if (cx > maxX) maxX = cx;
+                if (cy > maxY) maxY = cy;
+                pixelCount++;
+
+                if (cx > 0) tryVisit(queue, visited, pixels, width, current - 1);
+                if (cx + 1 < width) tryVisit(queue, visited, pixels, width, current + 1);
+                if (cy > 0) tryVisit(queue, visited, pixels, width, current - width);
+                if (cy + 1 < height) tryVisit(queue, visited, pixels, width, current + width);
+            }
+
+            if (maxX < minX || maxY < minY) {
+                continue;
+            }
+
+            FrameBounds candidate = new FrameBounds(minX, minY, maxX, maxY, pixelCount);
+            if (isEdgeMatte(candidate, width, height)) {
+                continue;
+            }
+            if ((candidate.area() < opts.minFrameArea() * 2)
+                    && (candidate.width() < 32 || candidate.height() < 32)) {
+                continue;
+            }
+            if (candidate.area() < opts.minFrameArea() && pixelCount < opts.minFrameArea()) {
+                continue;
+            }
+            frames.add(candidate);
+        }
+
+        return frames;
+    }
+
+    private static void tryVisit(ArrayDeque<Integer> queue,
+                                 boolean[] visited,
+                                 int[] pixels,
+                                 int width,
+                                 int nextIdx) {
+        if (visited[nextIdx]) {
+            return;
+        }
+        visited[nextIdx] = true;
+        if ((pixels[nextIdx] >>> 24) != 0) {
+            queue.add(nextIdx);
+        }
+    }
+
+    private record FrameBounds(int minX, int minY, int maxX, int maxY, int pixelCount) {
+        int width() { return maxX - minX + 1; }
+        int height() { return maxY - minY + 1; }
+        int area() { return width() * height(); }
+
+        FrameBounds expand(int padding, int sheetWidth, int sheetHeight) {
+            if (padding <= 0) {
+                return this;
+            }
+            int newMinX = Math.max(0, minX - padding);
+            int newMinY = Math.max(0, minY - padding);
+            int newMaxX = Math.min(sheetWidth - 1, maxX + padding);
+            int newMaxY = Math.min(sheetHeight - 1, maxY + padding);
+            return new FrameBounds(newMinX, newMinY, newMaxX, newMaxY, pixelCount);
+        }
+
+        FrameBounds merge(FrameBounds other) {
+            int newMinX = Math.min(this.minX, other.minX);
+            int newMinY = Math.min(this.minY, other.minY);
+            int newMaxX = Math.max(this.maxX, other.maxX);
+            int newMaxY = Math.max(this.maxY, other.maxY);
+            return new FrameBounds(newMinX, newMinY, newMaxX, newMaxY, this.pixelCount + other.pixelCount);
+        }
+
+        boolean touches(FrameBounds other, int gap) {
+            if (gap < 0) {
+                gap = 0;
+            }
+            int dx = 0;
+            if (other.minX > this.maxX + 1) {
+                dx = other.minX - this.maxX - 1;
+            } else if (this.minX > other.maxX + 1) {
+                dx = this.minX - other.maxX - 1;
+            }
+            int dy = 0;
+            if (other.minY > this.maxY + 1) {
+                dy = other.minY - this.maxY - 1;
+            } else if (this.minY > other.maxY + 1) {
+                dy = this.minY - other.maxY - 1;
+            }
+            return dx <= gap && dy <= gap;
+        }
+    }
+
+    private static List<FrameBounds> mergeBounds(List<FrameBounds> frames, Options opts) {
+        if (frames.size() <= 1) {
+            return frames;
+        }
+        int gap = opts.joinGap();
+        if (gap <= 0) {
+            return frames;
+        }
+
+        List<FrameBounds> working = new ArrayList<>(frames);
+        boolean merged;
+        do {
+            merged = false;
+            outer:
+            for (int i = 0; i < working.size(); i++) {
+                FrameBounds a = working.get(i);
+                for (int j = i + 1; j < working.size(); j++) {
+                    FrameBounds b = working.get(j);
+                    if (a.touches(b, gap)) {
+                        working.set(i, a.merge(b));
+                        working.remove(j);
+                        merged = true;
+                        break outer;
+                    }
+                }
+            }
+        } while (merged);
+        return working;
+    }
+
+    private record CleanSheet(int width, int height, int[] pixels) {}
 
     private static int estimateBackground(int[] pixels, int width, int height) {
-        Map<Integer, Integer> counts = new HashMap<>();
+        java.util.HashMap<Integer, SampleStats> stats = new java.util.HashMap<>();
         int stepX = Math.max(1, width / 12);
         int stepY = Math.max(1, height / 12);
 
         for (int x = 0; x < width; x += stepX) {
-            sample(pixels, width, height, counts, x, 0);
-            sample(pixels, width, height, counts, x, height - 1);
+            sample(pixels, width, height, stats, x, 0);
+            sample(pixels, width, height, stats, x, height - 1);
         }
         for (int y = 0; y < height; y += stepY) {
-            sample(pixels, width, height, counts, 0, y);
-            sample(pixels, width, height, counts, width - 1, y);
+            sample(pixels, width, height, stats, 0, y);
+            sample(pixels, width, height, stats, width - 1, y);
         }
 
-        return counts.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElseGet(() -> pixels.length == 0 ? 0 : pixels[0] & 0x00FFFFFF);
+        SampleStats preferred = null;
+        long preferredScore = Long.MIN_VALUE;
+        SampleStats fallback = null;
+        long fallbackScore = Long.MIN_VALUE;
+
+        for (SampleStats stat : stats.values()) {
+            if (stat.count() == 0) {
+                continue;
+            }
+            long brightness = stat.avgBrightness();
+            long saturation = stat.avgSaturation();
+            long score = stat.baseScore();
+            if (score > fallbackScore) {
+                fallbackScore = score;
+                fallback = stat;
+            }
+            if (brightness >= 170 && saturation <= 96) {
+                long brightScore = score * 4 + brightness * 2048L;
+                if (brightScore > preferredScore) {
+                    preferredScore = brightScore;
+                    preferred = stat;
+                }
+            }
+        }
+
+        SampleStats chosen = preferred != null ? preferred : fallback;
+        if (chosen != null) {
+            return chosen.toColour();
+        }
+        return pixels.length == 0 ? 0 : pixels[0] & 0x00FFFFFF;
     }
 
-    private static void sample(int[] pixels, int width, int height, Map<Integer, Integer> counts, int x, int y) {
+    private static void sample(int[] pixels,
+                               int width,
+                               int height,
+                               Map<Integer, SampleStats> stats,
+                               int x,
+                               int y) {
         if (x < 0 || y < 0 || x >= width || y >= height) return;
         int argb = pixels[y * width + x];
         int alpha = (argb >>> 24) & 0xFF;
         if (alpha < 16) return;
         int rgb = argb & 0x00FFFFFF;
-        counts.merge(rgb, 1, Integer::sum);
+        int key = quantize(rgb);
+        SampleStats stat = stats.computeIfAbsent(key, k -> new SampleStats());
+        stat.add(rgb);
+    }
+
+    private static int quantize(int rgb) {
+        int r = (rgb >>> 16) & 0xFF;
+        int g = (rgb >>> 8) & 0xFF;
+        int b = rgb & 0xFF;
+        return ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
     }
 
     private static int colourDistanceSq(int rgb, int otherRgb) {
@@ -262,5 +594,91 @@ public final class SpriteSheetSlicer {
         int dg = g1 - g2;
         int db = b1 - b2;
         return dr * dr + dg * dg + db * db;
+    }
+
+    private static boolean isEdgeMatte(FrameBounds bounds, int sheetWidth, int sheetHeight) {
+        int width = bounds.width();
+        int height = bounds.height();
+        long area = (long) width * height;
+        long sheetArea = (long) sheetWidth * sheetHeight;
+        int edgeSlackX = Math.max(2, sheetWidth / 64);
+        int edgeSlackY = Math.max(2, sheetHeight / 64);
+        boolean touchesLeft = bounds.minX <= edgeSlackX;
+        boolean touchesRight = bounds.maxX >= sheetWidth - 1 - edgeSlackX;
+        boolean touchesTop = bounds.minY <= edgeSlackY;
+        boolean touchesBottom = bounds.maxY >= sheetHeight - 1 - edgeSlackY;
+        boolean spansHorizontally = touchesLeft && touchesRight;
+        boolean spansVertically = touchesTop && touchesBottom;
+
+        if (area >= sheetArea * 3 / 5) {
+            return true;
+        }
+        if (spansHorizontally && height >= sheetHeight / 2) {
+            return true;
+        }
+        if (spansVertically && width >= sheetWidth / 2) {
+            return true;
+        }
+        if ((touchesTop || touchesBottom) && spansHorizontally && height >= sheetHeight / 4) {
+            return true;
+        }
+        if ((touchesLeft || touchesRight) && spansVertically && width >= sheetWidth / 3) {
+            return true;
+        }
+        return false;
+    }
+
+    private static final class SampleStats {
+        private int count;
+        private long sumR;
+        private long sumG;
+        private long sumB;
+        private long sumBrightness;
+        private long sumSaturation;
+
+        void add(int rgb) {
+            int r = (rgb >>> 16) & 0xFF;
+            int g = (rgb >>> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            int max = Math.max(r, Math.max(g, b));
+            int min = Math.min(r, Math.min(g, b));
+            count++;
+            sumR += r;
+            sumG += g;
+            sumB += b;
+            sumBrightness += max;
+            sumSaturation += (max - min);
+        }
+
+        int count() {
+            return count;
+        }
+
+        long avgBrightness() {
+            return count == 0 ? 0 : sumBrightness / count;
+        }
+
+        long avgSaturation() {
+            return count == 0 ? 0 : sumSaturation / count;
+        }
+
+        long baseScore() {
+            if (count == 0) {
+                return Long.MIN_VALUE;
+            }
+            long brightnessWeight = 64 + avgBrightness();
+            long saturationWeight = 64 + (255 - avgSaturation());
+            return (long) count * brightnessWeight * saturationWeight;
+        }
+
+        int toColour() {
+            if (count == 0) {
+                return 0;
+            }
+            int r = (int) (sumR / count);
+            int g = (int) (sumG / count);
+            int b = (int) (sumB / count);
+            return (r << 16) | (g << 8) | b;
+        }
     }
 }
