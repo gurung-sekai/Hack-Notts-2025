@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 import util.ResourceLoader;
+import util.SpriteSheetSlicer;
 
 /**
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
@@ -31,7 +32,22 @@ public class BossBattlePanel extends JPanel {
     private static final double SPRITE_SCALE_BOOST = 1.5;
     private static final double MESSAGE_LIFETIME = 3.5;
 
-    public enum BossKind { BIG_ZOMBIE, OGRE_WARLORD, SKELETON_LORD, PUMPKIN_KING, IMP_OVERLORD, WIZARD_ARCHON }
+    public enum BossKind {
+        BIG_ZOMBIE,
+        OGRE_WARLORD,
+        SKELETON_LORD,
+        PUMPKIN_KING,
+        IMP_OVERLORD,
+        WIZARD_ARCHON,
+        GOLLUM,
+        GRIM,
+        FIRE_FLINGER,
+        GOLD_MECH,
+        GOLDEN_KNIGHT,
+        PURPLE_EMPRESS,
+        THE_WELCH,
+        TOXIC_TREE
+    }
     public enum Outcome { HERO_WIN, HERO_LOSS }
 
     public static BossBattlePanel create(BossKind kind, Consumer<Outcome> onEnd) {
@@ -69,8 +85,8 @@ public class BossBattlePanel extends JPanel {
 
         int initialMomentum = Math.max(-2, Math.min(2, heroDef.openingMomentum - bossDef.momentumEdge));
         this.engine = new BattleEngine(heroDef.toFighter(), bossDef.toFighter(), initialMomentum, onEnd);
-        this.heroVisual = new FighterVisual(engine.hero, heroDef.spritePrefix, 280, 470, 3.2);
-        this.bossVisual = new FighterVisual(engine.boss, bossDef.spritePrefix, 700, 320, bossDef.scale);
+        this.heroVisual = new FighterVisual(engine.hero, heroDef.sprite, 280, 470, 3.2);
+        this.bossVisual = new FighterVisual(engine.boss, bossDef.sprite, 700, 320, bossDef.scale);
         this.floorTile = loadImage("/resources/tiles/floor/floor_5.png");
 
         addMessage("A wild " + bossDef.displayName + " appears!");
@@ -551,12 +567,12 @@ public class BossBattlePanel extends JPanel {
         final double baseScale;
         final Rectangle bounds = new Rectangle();
 
-        FighterVisual(Fighter fighter, String spritePrefix, double footX, double footY, double baseScale) {
+        FighterVisual(Fighter fighter, SpriteSource spriteSource, double footX, double footY, double baseScale) {
             this.fighter = fighter;
             this.footX = footX;
             this.footY = footY;
             this.baseScale = baseScale;
-            sprite.addFromPrefix(AnimatedSprite.State.IDLE, spritePrefix);
+            Objects.requireNonNull(spriteSource, "spriteSource").loadInto(sprite);
             sprite.setState(AnimatedSprite.State.IDLE);
             sprite.setFps(6.0);
         }
@@ -564,6 +580,25 @@ public class BossBattlePanel extends JPanel {
         void update(double dt) {
             sprite.update(dt);
         }
+    }
+
+    private interface SpriteSource {
+        void loadInto(AnimatedSprite sprite);
+    }
+
+    private static SpriteSource prefixSource(String prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        return sprite -> sprite.addFromPrefix(AnimatedSprite.State.IDLE, prefix);
+    }
+
+    private static SpriteSource sheetSource(String resourcePath) {
+        return sheetSource(resourcePath, SpriteSheetSlicer.Options.DEFAULT);
+    }
+
+    private static SpriteSource sheetSource(String resourcePath, SpriteSheetSlicer.Options options) {
+        Objects.requireNonNull(resourcePath, "resourcePath");
+        SpriteSheetSlicer.Options opts = options == null ? SpriteSheetSlicer.Options.DEFAULT : options;
+        return sprite -> sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath, opts);
     }
 
     // ---------------------------------------------------------------------
@@ -630,7 +665,7 @@ public class BossBattlePanel extends JPanel {
     // ---------------------------------------------------------------------
     // Hero / Boss definitions
     // ---------------------------------------------------------------------
-    private record HeroDefinition(String name, Affinity affinity, Stats stats, String spritePrefix,
+    private record HeroDefinition(String name, Affinity affinity, Stats stats, SpriteSource sprite,
                                   double offenseMod, double defenseMod, int openingMomentum) {
         Fighter toFighter() {
             return new Fighter(name, affinity, stats.copy(), offenseMod, defenseMod);
@@ -638,11 +673,11 @@ public class BossBattlePanel extends JPanel {
 
         static HeroDefinition defaultHero() {
             return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(240, 28, 20, 18),
-                    "/resources/sprites/Knight/Idle/knight_m_idle_anim_f", 1.12, 1.18, 2);
+                    prefixSource("/resources/sprites/Knight/Idle/knight_m_idle_anim_f"), 1.12, 1.18, 2);
         }
     }
 
-    private record BossDefinition(String displayName, Affinity affinity, Stats stats, String spritePrefix, double scale,
+    private record BossDefinition(String displayName, Affinity affinity, Stats stats, SpriteSource sprite, double scale,
                                   double offenseMod, double defenseMod, int momentumEdge) {
         Fighter toFighter() {
             return new Fighter(displayName, affinity, stats.copy(), offenseMod, defenseMod);
@@ -651,17 +686,33 @@ public class BossBattlePanel extends JPanel {
         static BossDefinition of(BossKind kind) {
             return switch (kind) {
                 case OGRE_WARLORD -> new BossDefinition("Ogre Warlord", Affinity.STONE,
-                        new Stats(230, 21, 15, 11), "/resources/sprites/Ogre/ogre_idle_anim_f", 3.5, 0.96, 1.02, 1);
+                        new Stats(230, 21, 15, 11), prefixSource("/resources/sprites/Ogre/ogre_idle_anim_f"), 3.5, 0.96, 1.02, 1);
                 case SKELETON_LORD -> new BossDefinition("Skeleton Lord", Affinity.VERDANT,
-                        new Stats(195, 18, 12, 22), "/resources/sprites/Skeleton/skelet_idle_anim_f", 3.3, 0.92, 0.94, 0);
+                        new Stats(195, 18, 12, 22), prefixSource("/resources/sprites/Skeleton/skelet_idle_anim_f"), 3.3, 0.92, 0.94, 0);
                 case PUMPKIN_KING -> new BossDefinition("Pumpkin King", Affinity.EMBER,
-                        new Stats(210, 19, 17, 15), "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 3.4, 0.94, 1.02, 0);
+                        new Stats(210, 19, 17, 15), prefixSource("/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f"), 3.4, 0.94, 1.02, 0);
                 case IMP_OVERLORD -> new BossDefinition("Imp Overlord", Affinity.STORM,
-                        new Stats(185, 20, 11, 24), "/resources/sprites/Imp/imp_idle_anim_f", 3.6, 0.98, 0.9, 0);
+                        new Stats(185, 20, 11, 24), prefixSource("/resources/sprites/Imp/imp_idle_anim_f"), 3.6, 0.98, 0.9, 0);
                 case WIZARD_ARCHON -> new BossDefinition("Wizard Archon", Affinity.STORM,
-                        new Stats(200, 22, 12, 19), "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 3.6, 0.99, 0.92, 1);
+                        new Stats(200, 22, 12, 19), prefixSource("/resources/sprites/Wizard/wizzard_m_idle_anim_f"), 3.6, 0.99, 0.92, 1);
                 case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
-                        new Stats(265, 17, 21, 9), "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 3.8, 0.88, 1.12, -1);
+                        new Stats(265, 17, 21, 9), prefixSource("/resources/sprites/Bigzombie/big_zombie_idle_anim_f"), 3.8, 0.88, 1.12, -1);
+                case GOLLUM -> new BossDefinition("Gollum", Affinity.STORM,
+                        new Stats(205, 23, 13, 27), sheetSource("/resources/bosses/Gollum.png"), 1.6, 1.05, 0.92, 1);
+                case GRIM -> new BossDefinition("Grim", Affinity.STONE,
+                        new Stats(245, 26, 18, 18), sheetSource("/resources/bosses/Grim.png"), 1.5, 1.1, 1.05, 0);
+                case FIRE_FLINGER -> new BossDefinition("Fire Flinger", Affinity.EMBER,
+                        new Stats(215, 24, 14, 23), sheetSource("/resources/bosses/fireFlinger.png"), 1.1, 1.08, 0.95, 1);
+                case GOLD_MECH -> new BossDefinition("Gold Mech", Affinity.STONE,
+                        new Stats(320, 28, 25, 12), sheetSource("/resources/bosses/goldMech.png"), 0.6, 1.05, 1.15, -1);
+                case GOLDEN_KNIGHT -> new BossDefinition("Golden Knight", Affinity.STONE,
+                        new Stats(260, 27, 22, 16), sheetSource("/resources/bosses/goldenKnight.png"), 1.3, 1.1, 1.08, 0);
+                case PURPLE_EMPRESS -> new BossDefinition("Purple Empress", Affinity.STORM,
+                        new Stats(210, 25, 15, 25), sheetSource("/resources/bosses/purpleEmpress.png"), 0.85, 1.12, 0.96, 1);
+                case THE_WELCH -> new BossDefinition("The Welch", Affinity.STORM,
+                        new Stats(285, 22, 20, 18), sheetSource("/resources/bosses/theWelch.png"), 0.55, 1.0, 1.05, 0);
+                case TOXIC_TREE -> new BossDefinition("Toxic Tree", Affinity.VERDANT,
+                        new Stats(270, 24, 19, 14), sheetSource("/resources/bosses/toxicTree.png"), 1.45, 1.06, 1.1, -1);
             };
         }
     }
