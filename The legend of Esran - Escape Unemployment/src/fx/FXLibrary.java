@@ -1,15 +1,17 @@
 package fx;
 
-import javax.imageio.ImageIO;
+import util.ResourceLoader;
+
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 
 /** Factory of ready-made effects matching your folder layout. */
 public final class FXLibrary {
     private FXLibrary() {}
 
     private static BufferedImage load(String path) {
-        try { return ImageIO.read(FXLibrary.class.getResource(path)); }
-        catch (Exception e) { throw new RuntimeException("Missing FX image: " + path, e); }
+        try { return ResourceLoader.image(path); }
+        catch (IOException e) { throw new RuntimeException("Missing FX image: " + path, e); }
     }
 
     // ----------------- Smoke Effects -----------------

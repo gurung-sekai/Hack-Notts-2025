@@ -1,7 +1,11 @@
 package gfx;
 
+import util.ResourceLoader;
+
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
@@ -34,18 +38,19 @@ public class AnimatedSprite {
 
     /** Load frames from a classpath prefix: /path/name_f  -> name_f0.png ... */
     public void addFromPrefix(State s, String resourcePrefix) {
-        try {
-            ArrayList<BufferedImage> list = new ArrayList<>();
-            for (int k = 0; k < 64; k++) {
-                String path = resourcePrefix + k + ".png";
-                var is = AnimatedSprite.class.getResourceAsStream(path);
+        ArrayList<BufferedImage> list = new ArrayList<>();
+        for (int k = 0; k < 64; k++) {
+            String path = resourcePrefix + k + ".png";
+            try (InputStream is = ResourceLoader.open(path)) {
                 if (is == null) break;
                 list.add(ImageIO.read(is));
+            } catch (IOException ex) {
+                System.err.println("Failed to load anim frame: " + path + " -> " + ex.getMessage());
+                break;
             }
-            if (!list.isEmpty()) add(s, list.toArray(new BufferedImage[0]));
-        } catch (Exception e) {
-            System.err.println("Failed to load anim: " + resourcePrefix + "*");
-            e.printStackTrace();
+        }
+        if (!list.isEmpty()) {
+            add(s, list.toArray(new BufferedImage[0]));
         }
     }
 
