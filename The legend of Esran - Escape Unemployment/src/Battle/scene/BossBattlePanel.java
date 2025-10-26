@@ -42,6 +42,7 @@ public class BossBattlePanel extends JPanel {
         }
     }
 
+
     private enum Phase { PLAYER_SELECT, PLAYER_ATTACK, ENEMY_ATTACK, WIN, GAME_OVER }
     private Phase phase = Phase.PLAYER_SELECT;
 
