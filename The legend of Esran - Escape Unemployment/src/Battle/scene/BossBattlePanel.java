@@ -13,9 +13,8 @@ import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -26,6 +25,11 @@ import util.ResourceLoader;
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
  */
 public class BossBattlePanel extends JPanel {
+
+    private static final double BASE_WIDTH = 960.0;
+    private static final double BASE_HEIGHT = 540.0;
+    private static final double SPRITE_SCALE_BOOST = 1.5;
+    private static final double MESSAGE_LIFETIME = 3.5;
 
     public enum BossKind { BIG_ZOMBIE, OGRE_WARLORD, SKELETON_LORD, PUMPKIN_KING, IMP_OVERLORD, WIZARD_ARCHON }
     public enum Outcome { HERO_WIN, HERO_LOSS }
@@ -48,7 +52,7 @@ public class BossBattlePanel extends JPanel {
     private final FighterVisual bossVisual;
     private final List<Effect> effects = new ArrayList<>();
     private final List<FloatingText> floatingTexts = new ArrayList<>();
-    private final Deque<String> logLines = new ArrayDeque<>();
+    private final List<BattleMessage> battleMessages = new ArrayList<>();
 
     private final BufferedImage floorTile;
 
@@ -65,8 +69,8 @@ public class BossBattlePanel extends JPanel {
 
         int initialMomentum = Math.max(-2, Math.min(2, heroDef.openingMomentum - bossDef.momentumEdge));
         this.engine = new BattleEngine(heroDef.toFighter(), bossDef.toFighter(), initialMomentum, onEnd);
-        this.heroVisual = new FighterVisual(engine.hero, heroDef.spritePrefix, 140, 260, 3.0);
-        this.bossVisual = new FighterVisual(engine.boss, bossDef.spritePrefix, 540, 140, bossDef.scale);
+        this.heroVisual = new FighterVisual(engine.hero, heroDef.spritePrefix, 280, 470, 3.2);
+        this.bossVisual = new FighterVisual(engine.boss, bossDef.spritePrefix, 700, 320, bossDef.scale);
         this.floorTile = loadImage("/resources/tiles/floor/floor_5.png");
 
         addMessage("A wild " + bossDef.displayName + " appears!");
@@ -107,58 +111,60 @@ public class BossBattlePanel extends JPanel {
     private void applyOutcome(RoundOutcome outcome) {
         addMessages(outcome.messages);
 
+        LayoutMetrics metrics = layoutMetrics();
+
         for (Event event : outcome.events) {
             switch (event.type) {
                 case DAMAGE -> {
                     FighterVisual target = visualFor(event.target);
                     if (target != null) {
-                        Point p = target.center();
+                        Point p = centerOf(target, metrics);
                         floatingTexts.add(FloatingText.damage("-" + event.value, p.x, p.y, event.critical));
                     }
-                    spawnEffect(event);
+                    spawnEffect(event, metrics);
                 }
                 case DOT -> {
                     FighterVisual target = visualFor(event.target);
                     if (target != null) {
-                        Point p = target.center();
+                        Point p = centerOf(target, metrics);
                         floatingTexts.add(FloatingText.dot("-" + event.value, p.x, p.y));
                     }
                 }
                 case HEAL -> {
                     FighterVisual actor = visualFor(event.actor);
                     if (actor != null) {
-                        Point p = actor.center();
+                        Point p = centerOf(actor, metrics);
                         floatingTexts.add(FloatingText.heal("+" + event.value, p.x, p.y));
                     }
                 }
                 case MISS -> {
                     FighterVisual target = visualFor(event.target);
                     if (target != null) {
-                        Point p = target.center();
+                        Point p = centerOf(target, metrics);
                         floatingTexts.add(FloatingText.miss(p.x, p.y));
                     }
                 }
                 case STATUS -> {
                     FighterVisual target = visualFor(event.target);
                     if (target != null) {
-                        Point p = target.center();
+                        Point p = centerOf(target, metrics);
                         floatingTexts.add(FloatingText.buff(event.message, p.x, p.y));
                     }
                 }
                 case GUARD -> {
                     FighterVisual actor = visualFor(event.actor);
                     if (actor != null) {
-                        Point p = actor.center();
+                        Point p = centerOf(actor, metrics);
                         floatingTexts.add(FloatingText.buff(event.message, p.x, p.y));
                     }
                 }
                 case INTERRUPT -> {
                     FighterVisual target = visualFor(event.target);
                     if (target != null) {
-                        Point p = target.center();
+                        Point p = centerOf(target, metrics);
                         floatingTexts.add(FloatingText.buff("Interrupted!", p.x, p.y));
                     }
-                    spawnEffect(event);
+                    spawnEffect(event, metrics);
                 }
             }
         }
@@ -177,7 +183,7 @@ public class BossBattlePanel extends JPanel {
         }
     }
 
-    private void spawnEffect(Event event) {
+    private void spawnEffect(Event event, LayoutMetrics metrics) {
         FighterVisual actor = visualFor(event.actor);
         FighterVisual target = visualFor(event.target);
         Technique tech = event.technique;
@@ -186,8 +192,8 @@ public class BossBattlePanel extends JPanel {
         switch (tech.name) {
             case "Flame Lash" -> {
                 if (actor != null && target != null) {
-                    Point a = actor.center();
-                    Point t = target.center();
+                    Point a = centerOf(actor, metrics);
+                    Point t = centerOf(target, metrics);
                     double dir = (actor == heroVisual) ? 1 : -1;
                     effects.add(FXLibrary.fireBreath(a.x, a.y - 20, dir, 0));
                     effects.add(FXLibrary.fireHit(t.x, t.y - 30));
@@ -195,19 +201,19 @@ public class BossBattlePanel extends JPanel {
             }
             case "Thorn Bind" -> {
                 if (target != null) {
-                    Point t = target.center();
+                    Point t = centerOf(target, metrics);
                     effects.add(FXLibrary.smokeLarge(t.x - 40, t.y - 40));
                 }
             }
             case "Brace" -> {
                 if (actor != null) {
-                    Point a = actor.center();
+                    Point a = centerOf(actor, metrics);
                     effects.add(FXLibrary.shieldBlockScreen(a.x, a.y));
                 }
             }
             case "Disrupt Bolt" -> {
                 if (target != null) {
-                    Point t = target.center();
+                    Point t = centerOf(target, metrics);
                     effects.add(FXLibrary.thunderStrike(t.x - 40, t.y - 120));
                     effects.add(FXLibrary.thunderSplash(t.x - 60, t.y - 60));
                 }
@@ -236,6 +242,14 @@ public class BossBattlePanel extends JPanel {
         floatingTexts.forEach(ft -> ft.update(dt));
         floatingTexts.removeIf(FloatingText::dead);
 
+        for (Iterator<BattleMessage> it = battleMessages.iterator(); it.hasNext(); ) {
+            BattleMessage msg = it.next();
+            msg.life -= dt;
+            if (msg.life <= 0) {
+                it.remove();
+            }
+        }
+
         if (phase == Phase.RESOLVING) {
             resolveLock -= dt;
             if (resolveLock <= 0) {
@@ -255,16 +269,30 @@ public class BossBattlePanel extends JPanel {
     @Override protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+
+        LayoutMetrics metrics = layoutMetrics();
 
         drawFloor(g2);
         drawEffectsBehind(g2);
-        drawFighter(g2, heroVisual, false);
-        drawFighter(g2, bossVisual, true);
+        drawFighter(g2, heroVisual, false, metrics);
+        drawFighter(g2, bossVisual, true, metrics);
         drawEffectsFront(g2);
-        drawFloatingTexts(g2);
-        drawHud(g2);
+        drawFloatingTexts(g2, metrics);
+        drawHud(g2, metrics);
     }
+
+    private LayoutMetrics layoutMetrics() {
+        double scale = Math.min(getWidth() / BASE_WIDTH, getHeight() / BASE_HEIGHT);
+        if (Double.isNaN(scale) || scale <= 0) {
+            scale = 1.0;
+        }
+        double offsetX = (getWidth() - BASE_WIDTH * scale) / 2.0;
+        double offsetY = (getHeight() - BASE_HEIGHT * scale) / 2.0;
+        return new LayoutMetrics(scale, offsetX, offsetY);
+    }
+
+    private record LayoutMetrics(double scale, double offsetX, double offsetY) { }
 
     private void drawFloor(Graphics2D g2) {
         if (floorTile == null) return;
@@ -287,103 +315,215 @@ public class BossBattlePanel extends JPanel {
         // world-space effects already rendered in drawEffectsBehind; we keep hook for layering if needed.
     }
 
-    private void drawFloatingTexts(Graphics2D g2) {
-        g2.setFont(new Font("Arial", Font.BOLD, 18));
+    private void drawFloatingTexts(Graphics2D g2, LayoutMetrics metrics) {
+        float fontSize = (float) Math.max(18.0, 18.0 * metrics.scale());
+        g2.setFont(g2.getFont().deriveFont(Font.BOLD, fontSize));
         for (FloatingText ft : floatingTexts) {
             g2.setColor(ft.color);
             g2.drawString(ft.text, (int) ft.x, (int) ft.y);
         }
     }
 
-    private void drawFighter(Graphics2D g2, FighterVisual vis, boolean flip) {
+    private void drawFighter(Graphics2D g2, FighterVisual vis, boolean flip, LayoutMetrics metrics) {
         BufferedImage frame = vis.sprite.frame();
-        if (frame == null) return;
-        int w = (int) Math.round(frame.getWidth() * vis.scale);
-        int h = (int) Math.round(frame.getHeight() * vis.scale);
-        int x1 = vis.x;
-        int y1 = vis.y;
+        Rectangle bounds = layoutFighter(vis, frame, metrics);
+        if (frame == null || bounds.width <= 0 || bounds.height <= 0) {
+            return;
+        }
         if (flip) {
-            g2.drawImage(frame, x1 + w, y1, x1, y1 + h, 0, 0, frame.getWidth(), frame.getHeight(), null);
+            g2.drawImage(frame, bounds.x + bounds.width, bounds.y, bounds.x, bounds.y + bounds.height,
+                    0, 0, frame.getWidth(), frame.getHeight(), null);
         } else {
-            g2.drawImage(frame, x1, y1, x1 + w, y1 + h, 0, 0, frame.getWidth(), frame.getHeight(), null);
+            g2.drawImage(frame, bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height,
+                    0, 0, frame.getWidth(), frame.getHeight(), null);
         }
     }
 
-    private void drawHud(Graphics2D g2) {
-        g2.setColor(new Color(0, 0, 0, 180));
-        g2.fillRoundRect(20, 20, 300, 120, 16, 16);
-        g2.fillRoundRect(getWidth() - 320, 20, 300, 120, 16, 16);
-        g2.fillRoundRect(20, getHeight() - 190, getWidth() - 40, 170, 16, 16);
-
-        g2.setColor(Color.WHITE);
-        g2.setFont(new Font("Arial", Font.BOLD, 18));
-        drawFighterHud(g2, heroVisual, 40, 50);
-        drawFighterHud(g2, bossVisual, getWidth() - 300, 50);
-        drawCommands(g2);
-        drawLog(g2);
+    private Rectangle layoutFighter(FighterVisual vis, BufferedImage frame, LayoutMetrics metrics) {
+        double scale = metrics.scale();
+        double offsetX = metrics.offsetX();
+        double offsetY = metrics.offsetY();
+        int cx = (int) Math.round(offsetX + vis.footX * scale);
+        int cy = (int) Math.round(offsetY + vis.footY * scale);
+        if (frame == null) {
+            vis.bounds.setBounds(cx, cy, 0, 0);
+            return vis.bounds;
+        }
+        double spriteScale = vis.baseScale * scale * SPRITE_SCALE_BOOST;
+        int w = Math.max(1, (int) Math.round(frame.getWidth() * spriteScale));
+        int h = Math.max(1, (int) Math.round(frame.getHeight() * spriteScale));
+        vis.bounds.setBounds(cx - w / 2, cy - h, w, h);
+        return vis.bounds;
     }
 
-    private void drawFighterHud(Graphics2D g2, FighterVisual vis, int x, int y) {
+    private Point centerOf(FighterVisual vis, LayoutMetrics metrics) {
+        Rectangle bounds = layoutFighter(vis, vis.sprite.frame(), metrics);
+        return new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    }
+
+    private Point centerOf(FighterVisual vis) {
+        return centerOf(vis, layoutMetrics());
+    }
+
+    private void drawHud(Graphics2D g2, LayoutMetrics metrics) {
+        double scale = metrics.scale();
+        int radius = (int) Math.round(18 * scale);
+        Rectangle heroBox = new Rectangle(
+                (int) Math.round(metrics.offsetX() + 32 * scale),
+                (int) Math.round(metrics.offsetY() + 36 * scale),
+                (int) Math.round(320 * scale),
+                (int) Math.round(150 * scale));
+        Rectangle bossBox = new Rectangle(
+                getWidth() - heroBox.x - heroBox.width,
+                heroBox.y,
+                heroBox.width,
+                heroBox.height);
+        int maxAvailable = (int) Math.round(getWidth() - 2.0 * heroBox.x);
+        if (maxAvailable <= 0) {
+            maxAvailable = (int) Math.round(getWidth() * 0.9);
+        }
+        int commandsWidth = Math.max((int) Math.round(420 * scale),
+                Math.min((int) Math.round(720 * scale), maxAvailable));
+        int commandsHeight = (int) Math.max(120, Math.round(160 * scale));
+        int commandsY = Math.max(heroBox.y + heroBox.height + radius,
+                (int) Math.round(getHeight() - metrics.offsetY() - 60 * scale - commandsHeight));
+        commandsY = Math.min(commandsY, getHeight() - commandsHeight - (int) Math.round(24 * scale));
+        commandsY = Math.max(commandsY, heroBox.y + heroBox.height + radius);
+        Rectangle commandsBox = new Rectangle(
+                Math.max(0, (getWidth() - commandsWidth) / 2),
+                commandsY,
+                commandsWidth,
+                commandsHeight);
+
+        g2.setColor(new Color(0, 0, 0, 190));
+        g2.fillRoundRect(heroBox.x, heroBox.y, heroBox.width, heroBox.height, radius, radius);
+        g2.fillRoundRect(bossBox.x, bossBox.y, bossBox.width, bossBox.height, radius, radius);
+        g2.fillRoundRect(commandsBox.x, commandsBox.y, commandsBox.width, commandsBox.height, radius, radius);
+
+        Font baseFont = g2.getFont();
+        Font titleFont = baseFont.deriveFont(Font.BOLD, (float) Math.max(20.0, 22.0 * scale));
+        Font infoFont = baseFont.deriveFont(Font.PLAIN, (float) Math.max(16.0, 18.0 * scale));
+        Font commandFont = baseFont.deriveFont(Font.PLAIN, (float) Math.max(18.0, 20.0 * scale));
+        Font smallFont = baseFont.deriveFont(Font.PLAIN, (float) Math.max(16.0, 17.0 * scale));
+
+        drawFighterHud(g2, heroVisual, heroBox, scale, titleFont, infoFont);
+        drawFighterHud(g2, bossVisual, bossBox, scale, titleFont, infoFont);
+        drawCommands(g2, commandsBox, scale, commandFont, smallFont);
+        drawMessages(g2, commandsBox, metrics);
+    }
+
+    private void drawFighterHud(Graphics2D g2, FighterVisual vis, Rectangle box, double scale,
+                                Font titleFont, Font infoFont) {
         Fighter f = vis.fighter;
-        g2.drawString(f.name, x, y);
-        int barWidth = 240;
+        int padding = (int) Math.round(18 * scale);
+        g2.setColor(Color.WHITE);
+        g2.setFont(titleFont);
+        FontMetrics titleMetrics = g2.getFontMetrics();
+        int nameBaseline = box.y + padding + titleMetrics.getAscent();
+        g2.drawString(f.name, box.x + padding, nameBaseline);
+
+        g2.setFont(infoFont);
+        FontMetrics infoMetrics = g2.getFontMetrics();
+        int barY = nameBaseline + infoMetrics.getDescent() + (int) Math.round(6 * scale);
+        int barWidth = box.width - padding * 2;
+        int barHeight = (int) Math.max(12, Math.round(20 * scale));
         double hpRatio = Math.max(0, (double) f.hp / f.base.hp);
         g2.setColor(Color.DARK_GRAY);
-        g2.fillRect(x, y + 10, barWidth, 16);
+        g2.fillRect(box.x + padding, barY, barWidth, barHeight);
         g2.setColor(new Color(190, 50, 50));
-        g2.fillRect(x, y + 10, (int) (barWidth * hpRatio), 16);
+        g2.fillRect(box.x + padding, barY, (int) Math.round(barWidth * hpRatio), barHeight);
         g2.setColor(Color.WHITE);
-        g2.drawRect(x, y + 10, barWidth, 16);
-        g2.drawString(f.hp + " / " + f.base.hp, x, y + 40);
-        g2.drawString("Status: " + f.status, x, y + 60);
+        g2.drawRect(box.x + padding, barY, barWidth, barHeight);
+
+        int statsBaseline = barY + barHeight + infoMetrics.getAscent() + (int) Math.round(6 * scale);
+        g2.drawString(f.hp + " / " + f.base.hp, box.x + padding, statsBaseline);
+        g2.drawString("Status: " + f.status, box.x + padding, statsBaseline + infoMetrics.getHeight());
     }
 
-    private void drawCommands(Graphics2D g2) {
-        g2.setFont(new Font("Arial", Font.PLAIN, 18));
-        int x = 60;
-        int y = getHeight() - 150;
+    private void drawCommands(Graphics2D g2, Rectangle box, double scale, Font commandFont, Font smallFont) {
+        int padding = (int) Math.round(20 * scale);
+        g2.setFont(commandFont);
+        FontMetrics commandMetrics = g2.getFontMetrics();
+        int lineHeight = commandMetrics.getHeight();
+        int y = box.y + padding + commandMetrics.getAscent();
+        int x = box.x + padding;
         for (int i = 0; i < moves.length; i++) {
             Technique t = moves[i];
             boolean selected = (i == cmdIndex);
             int cooldown = engine.cooldownRemaining(engine.hero, t);
             String label = t.name + " (" + t.affinity + ")";
-            if (cooldown > 0) label += " — CD " + cooldown;
-            if (selected) {
-                g2.setColor(new Color(255, 215, 0));
-            } else {
-                g2.setColor(Color.LIGHT_GRAY);
+            if (cooldown > 0) {
+                label += " — CD " + cooldown;
             }
-            g2.drawString((selected ? "> " : "  ") + label, x, y + i * 28);
+            g2.setColor(selected ? new Color(255, 215, 0) : Color.LIGHT_GRAY);
+            g2.drawString((selected ? "> " : "  ") + label, x, y + i * lineHeight);
         }
+
+        g2.setFont(smallFont);
         g2.setColor(Color.WHITE);
-        g2.drawString("Momentum: " + engine.momentum, getWidth() - 220, getHeight() - 150);
+        int infoY = box.y + box.height - padding;
+        String momentum = "Momentum: " + engine.momentum;
+        int momentumWidth = g2.getFontMetrics().stringWidth(momentum);
+        g2.drawString(momentum, box.x + box.width - padding - momentumWidth, infoY);
         if (phase != Phase.PLAYER_SELECT) {
-            g2.drawString("Resolving...", getWidth() - 220, getHeight() - 120);
+            g2.drawString("Resolving...", box.x + padding, infoY);
         }
     }
 
-    private void drawLog(Graphics2D g2) {
-        g2.setFont(new Font("Monospaced", Font.PLAIN, 16));
-        int x = 60;
-        int y = getHeight() - 90;
-        for (String line : logLines) {
-            g2.setColor(Color.WHITE);
-            g2.drawString(line, x, y);
-            y += 20;
+    private void drawMessages(Graphics2D g2, Rectangle commandsBox, LayoutMetrics metrics) {
+        if (battleMessages.isEmpty()) {
+            return;
+        }
+        double scale = metrics.scale();
+        Font messageFont = g2.getFont().deriveFont(Font.BOLD, (float) Math.max(18.0, 20.0 * scale));
+        g2.setFont(messageFont);
+        FontMetrics fm = g2.getFontMetrics();
+        int padding = (int) Math.round(16 * scale);
+        int lineHeight = fm.getHeight();
+        int width = battleMessages.stream()
+                .mapToInt(msg -> fm.stringWidth(msg.text))
+                .max()
+                .orElse(0) + padding * 2;
+        width = Math.min(width, Math.min((int) Math.round(700 * scale), getWidth() - padding * 2));
+        int height = battleMessages.size() * lineHeight + padding * 2;
+        int x = (getWidth() - width) / 2;
+        int y = Math.max((int) Math.round(metrics.offsetY() + 24 * scale),
+                commandsBox.y - height - (int) Math.round(20 * scale));
+
+        g2.setColor(new Color(0, 0, 0, 190));
+        g2.fillRoundRect(x, y, width, height, (int) Math.round(24 * scale), (int) Math.round(24 * scale));
+
+        int textY = y + padding + fm.getAscent();
+        for (BattleMessage message : battleMessages) {
+            float alpha = (float) Math.max(0.0, Math.min(1.0, message.life / message.totalLife));
+            g2.setColor(new Color(255, 255, 255, Math.round(alpha * 255)));
+            int textX = x + (width - fm.stringWidth(message.text)) / 2;
+            g2.drawString(message.text, textX, textY);
+            textY += lineHeight;
         }
     }
 
     private void addMessage(String msg) {
-        if (msg == null || msg.isBlank()) return;
-        logLines.addLast(msg);
-        while (logLines.size() > 6) {
-            logLines.removeFirst();
+        if (msg == null) {
+            return;
+        }
+        String trimmed = msg.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        battleMessages.add(new BattleMessage(trimmed, MESSAGE_LIFETIME));
+        while (battleMessages.size() > 5) {
+            battleMessages.remove(0);
         }
     }
 
     private void addMessages(List<String> msgs) {
-        if (msgs == null) return;
-        for (String s : msgs) addMessage(s);
+        if (msgs == null) {
+            return;
+        }
+        for (String s : msgs) {
+            addMessage(s);
+        }
     }
 
     private void queueOutcome(Outcome outcome) {
@@ -406,14 +546,16 @@ public class BossBattlePanel extends JPanel {
     private static class FighterVisual {
         final Fighter fighter;
         final AnimatedSprite sprite = new AnimatedSprite(0, 0);
-        final int x, y;
-        final double scale;
+        final double footX;
+        final double footY;
+        final double baseScale;
+        final Rectangle bounds = new Rectangle();
 
-        FighterVisual(Fighter fighter, String spritePrefix, int x, int y, double scale) {
+        FighterVisual(Fighter fighter, String spritePrefix, double footX, double footY, double baseScale) {
             this.fighter = fighter;
-            this.x = x;
-            this.y = y;
-            this.scale = scale;
+            this.footX = footX;
+            this.footY = footY;
+            this.baseScale = baseScale;
             sprite.addFromPrefix(AnimatedSprite.State.IDLE, spritePrefix);
             sprite.setState(AnimatedSprite.State.IDLE);
             sprite.setFps(6.0);
@@ -421,14 +563,6 @@ public class BossBattlePanel extends JPanel {
 
         void update(double dt) {
             sprite.update(dt);
-        }
-
-        Point center() {
-            BufferedImage frame = sprite.frame();
-            if (frame == null) return new Point(x, y);
-            int w = (int) Math.round(frame.getWidth() * scale);
-            int h = (int) Math.round(frame.getHeight() * scale);
-            return new Point(x + w / 2, y + h / 2);
         }
     }
 
@@ -478,6 +612,18 @@ public class BossBattlePanel extends JPanel {
 
         boolean dead() {
             return life <= 0;
+        }
+    }
+
+    private static class BattleMessage {
+        final String text;
+        final double totalLife;
+        double life;
+
+        BattleMessage(String text, double lifetime) {
+            this.text = text;
+            this.life = lifetime;
+            this.totalLife = lifetime;
         }
     }
 

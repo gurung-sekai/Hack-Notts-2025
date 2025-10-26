@@ -9,7 +9,9 @@ import launcher.GameLauncher;
 import launcher.GameSettings;
 import launcher.LanguageBundle;
 import security.GameSecurity;
+import util.ResourceLoader;
 
+import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -34,6 +36,8 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.Serial;
 import java.io.Serializable;
 import java.security.SecureRandom;
@@ -137,6 +141,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private static final int MESSAGE_SECONDS = 3;
+    private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
+    private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
+    private static final String BOSS_IDLE_PREFIX = "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
 
     private final GameSettings settings;
     private final ControlsProfile controls;
@@ -251,9 +258,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         inBoss = false;
         paused = false;
         textures = DungeonTextures.load();
-        playerIdleFrames = createIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
-        enemyIdleFrames = createIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
-        bossIdleFrames = createIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+        playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
+        if (playerIdleFrames == null) {
+            playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
+        }
+        enemyIdleFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
+        if (enemyIdleFrames == null) {
+            enemyIdleFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        }
+        bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
+        if (bossIdleFrames == null) {
+            bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+        }
         initializeBossPool();
         room = makeOrGetRoom(worldPos, null);
         spawnEnemiesIfNeeded(worldPos, room);
@@ -264,9 +280,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void restoreFromSnapshot(DungeonRoomsSnapshot snapshot) {
         textures = DungeonTextures.load();
-        playerIdleFrames = createIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
-        enemyIdleFrames = createIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
-        bossIdleFrames = createIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+        playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
+        if (playerIdleFrames == null) {
+            playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
+        }
+        enemyIdleFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
+        if (enemyIdleFrames == null) {
+            enemyIdleFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        }
+        bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
+        if (bossIdleFrames == null) {
+            bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+        }
 
         world = snapshot.world();
         bossEncounters = snapshot.bossEncounters();
@@ -320,7 +345,26 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return new Point(Math.max(0, Math.min(COLS * TILE, gx)), Math.max(0, Math.min(ROWS * TILE, gy)));
     }
 
-    private BufferedImage[] createIdleFrames(Color base, Color outline) {
+    private BufferedImage[] loadSpriteSequence(String prefix, int from, int toInclusive) {
+        List<BufferedImage> frames = new ArrayList<>();
+        for (int i = from; i <= toInclusive; i++) {
+            String resource = prefix + i + ".png";
+            try (InputStream in = ResourceLoader.open(resource)) {
+                if (in == null) {
+                    continue;
+                }
+                BufferedImage img = ImageIO.read(in);
+                if (img != null) {
+                    frames.add(img);
+                }
+            } catch (IOException ex) {
+                System.err.println("Failed to load sprite frame: " + resource + " -> " + ex.getMessage());
+            }
+        }
+        return frames.isEmpty() ? null : frames.toArray(new BufferedImage[0]);
+    }
+
+    private BufferedImage[] fallbackIdleFrames(Color base, Color outline) {
         BufferedImage[] frames = new BufferedImage[4];
         for (int i = 0; i < frames.length; i++) {
             BufferedImage img = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
@@ -1115,12 +1159,17 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 if (textures != null && textures.isReady()) {
                     int fCount = Math.max(1, textures.floorVariants());
                     int fIdx = Math.floorMod(x * 17 + y * 31, fCount);
-                    int wIdx = Math.floorMod(x * 11 + y * 7, Math.max(1, textures.wallVariants()));
+                    int wIdx = 0;
                     switch (t) {
                         case FLOOR -> gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
                         case WALL  -> gg.drawImage(textures.wallVariant(wIdx),  px, py, TILE, TILE, null);
                         case DOOR  -> {
-                            gg.drawImage(textures.doorFloor(), px, py, TILE, TILE, null);
+                            BufferedImage doorTile = textures.doorFloor();
+                            if (doorTile != null) {
+                                gg.drawImage(doorTile, px, py, TILE, TILE, null);
+                            } else {
+                                gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
+                            }
                             gg.setColor(new Color(220, 172, 60));
                             if (x == 0 || x == COLS - 1)
                                 gg.fillRect(px + (x == 0 ? 0 : TILE - 6), py + 6, 6, TILE - 12);
