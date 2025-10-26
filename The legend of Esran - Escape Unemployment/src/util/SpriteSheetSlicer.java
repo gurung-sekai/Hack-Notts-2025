@@ -19,7 +19,7 @@ public final class SpriteSheetSlicer {
 
     /** Immutable configuration for a slicing run. */
     public record Options(int backgroundTolerance, int alphaThreshold, int padding, int minFrameArea) {
-        public static final Options DEFAULT = new Options(48, 8, 2, 160);
+        public static final Options DEFAULT = new Options(72, 32, 2, 160);
 
         public Options {
             if (backgroundTolerance < 0) throw new IllegalArgumentException("backgroundTolerance must be >= 0");
