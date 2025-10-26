@@ -1,16 +1,41 @@
+import org.gradle.api.Project
+
 plugins {
     id 'application'
 }
 
-repositories {
-    mavenCentral()
+static File locateJavaFxLib(Project project) {
+    List<File> candidates = [
+            project.file("${project.rootDir}/javafx-sdk-21.0.2/lib"),
+            project.file("${project.rootDir}/javafx-sdk-25.0.1/lib"),
+            project.file("${project.rootDir}/javafx-sdk/lib"),
+            project.file("${project.projectDir}/javafx-sdk-21.0.2/lib"),
+            project.file("${project.projectDir}/javafx-sdk-25.0.1/lib"),
+            project.file("${project.projectDir}/javafx-sdk/lib"),
+            project.file("${project.projectDir}/../javafx-sdk-21.0.2/lib"),
+            project.file("${project.projectDir}/../javafx-sdk-25.0.1/lib"),
+            project.file("${project.projectDir}/../javafx-sdk/lib"),
+            project.file("${project.projectDir}/lib/javafx"),
+            project.file("${project.rootDir}/lib/javafx")
+    ]
+    return candidates.find { it.exists() && it.isDirectory() }
 }
 
-def javaFxLibDir = file("${rootProject.projectDir}/../javafx-sdk-21.0.2/lib")
+def javaFxLibDir = locateJavaFxLib(project)
+if (javaFxLibDir == null) {
+    throw new GradleException("JavaFX SDK jars not found. Place an extracted sdk under one of: " +
+            "javafx-sdk-21.0.2/lib, javafx-sdk-25.0.1/lib, javafx-sdk/lib, or lib/javafx relative to the project root.")
+}
+
 def isWindowsHost = System.properties['os.name']?.toLowerCase()?.contains('win') ?: false
 
+def javaFxJars = javaFxLibDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
+if (javaFxJars.isEmpty()) {
+    throw new GradleException("JavaFX SDK directory ${javaFxLibDir} does not contain any .jar files.")
+}
+
 dependencies {
-    implementation fileTree(dir: javaFxLibDir, include: ['*.jar'])
+    implementation files(javaFxJars)
 }
 
 application {
