@@ -345,6 +345,14 @@ public final class SpriteSheetSlicer {
                     register(refined, seen, split);
                 }
             }
+            if (countHigh > 0) {
+                centroidHigh = sumHigh / countHigh;
+            }
+        }
+
+        double separation = Math.abs(centroidHigh - centroidLow);
+        if (separation < 1e-3) {
+            return null;
         }
         return refined;
     }
