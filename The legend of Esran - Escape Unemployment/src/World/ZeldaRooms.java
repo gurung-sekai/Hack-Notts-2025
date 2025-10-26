@@ -1,40 +1,34 @@
 package World;
 
-import World.gfx.DungeonTextures;
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
+import World.gfx.DungeonTextures;
 import security.GameSecurity;
 
+import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 import java.awt.AlphaComposite;
-import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Composite;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
-import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
-
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionAdapter;
-
-import java.awt.geom.GeneralPath;
-
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,12 +37,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.Locale;
-
-import javax.imageio.ImageIO;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Zelda-style, one-room view with persistent rooms.
@@ -61,6 +55,8 @@ import javax.imageio.ImageIO;
  */
 public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
 
+    private static final Logger LOGGER = Logger.getLogger(ZeldaRooms.class.getName());
+
     // ----- Tunables -----
     static final int TILE = 36;           // pixels per tile
     static final int COLS = 21;           // room width (odd looks nice)
@@ -70,6 +66,18 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     static final int PLAYER_SPEED = 4;    // px per tick
     static final Color BG = new Color(6, 24, 32);
 
+    private static final double ENEMY_MOVE_SPEED = 0.9;
+    private static final double ENEMY_PROJECTILE_SPEED = 3.75;
+    private static final double PLAYER_PROJECTILE_SPEED = 7.0;
+    private static final int ENEMY_COOLDOWN_BASE = 60;
+    private static final int ENEMY_COOLDOWN_VARIATION = 40;
+    private static final int PLAYER_MAX_HP = 5;
+    private static final int PLAYER_DAMAGE_IFRAMES = 40;
+    private static final int PLAYER_RESPAWN_IFRAMES = 60;
+    private static final int MAX_ENEMY_SPAWN_ATTEMPTS = 50;
+    private static final int MIN_ENEMY_SPAWN_DISTANCE = TILE * 4;
+    private static final double EPSILON = 1e-6;
+
     enum T { VOID, FLOOR, WALL, DOOR }
     enum Dir { N, S, W, E }
 
@@ -77,6 +85,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         int x, y;
         int size = (int)(TILE * 0.6);
         int cd = 0;
+        boolean alive = true;
     }
 
     static class Bullet {
@@ -150,7 +159,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     private final List<Bullet> bullets = new ArrayList<>();       // enemy bullets
     private final List<Bullet> playerBullets = new ArrayList<>(); // player bullets
     private final List<Explosion> explosions = new ArrayList<>();
-    private int playerHP = 5;
+    private int playerHP = PLAYER_MAX_HP;
     private int iFrames = 0;
     private int keysHeld = 0;
     private String statusMessage = "";
@@ -233,20 +242,32 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         int count = 4 + rng.nextInt(4);
         for (int i = 0; i < count; i++) {
             int tries = 0;
-            while (tries++ < 50) {
+            while (tries++ < MAX_ENEMY_SPAWN_ATTEMPTS) {
                 int tx = 2 + rng.nextInt(COLS - 4);
                 int ty = 2 + rng.nextInt(ROWS - 4);
                 if (r.g[tx][ty] != T.FLOOR) continue;
-                int px = tx * TILE + TILE/2;
-                int py = ty * TILE + TILE/2;
-                if (!isRectFree(r, px, py, (int)(TILE*0.3))) continue;
-                if (player != null && (Math.abs(px - (player.x+player.width/2)) + Math.abs(py - (player.y+player.height/2)) < TILE*4)) continue;
+                int px = tx * TILE + TILE / 2;
+                int py = ty * TILE + TILE / 2;
+                if (!isRectFree(r, px, py, (int) (TILE * 0.3))) continue;
+                if (isTooCloseToPlayer(px, py)) continue;
                 Enemy e = new Enemy();
-                e.x = px; e.y = py; e.cd = rng.nextInt(30);
+                e.x = px;
+                e.y = py;
+                e.cd = rng.nextInt(30);
+                e.alive = true;
                 r.enemies.add(e);
                 break;
             }
         }
+    }
+
+    private boolean isTooCloseToPlayer(int px, int py) {
+        if (player == null) {
+            return false;
+        }
+        int playerCenterX = player.x + player.width / 2;
+        int playerCenterY = player.y + player.height / 2;
+        return Math.abs(px - playerCenterX) + Math.abs(py - playerCenterY) < MIN_ENEMY_SPAWN_DISTANCE;
     }
 
     private boolean isBossRoom(Point pos) {
@@ -268,87 +289,160 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     }
 
     private void updateCombat() {
-        if (room == null) return;
+        if (room == null || player == null) {
+            return;
+        }
         dropKeyIfEligible(room);
 
-        int pcx = player.x + player.width/2;
-        int pcy = player.y + player.height/2;
+        int playerCenterX = player.x + player.width / 2;
+        int playerCenterY = player.y + player.height / 2;
 
-        for (Enemy e : room.enemies) {
-            int dx = pcx - e.x;
-            int dy = pcy - e.y;
-            double len = Math.hypot(dx, dy);
-            if (len > 1) {
-                double speed = 0.9;
-                int mx = (int)Math.round(dx/len * speed);
-                int my = (int)Math.round(dy/len * speed);
-                attemptEnemyMove(e, mx, 0);
-                attemptEnemyMove(e, 0, my);
+        updateEnemies(playerCenterX, playerCenterY);
+        updateEnemyBullets();
+        updatePlayerBullets();
+        cleanUpDefeatedEnemies();
+        dropKeyIfEligible(room);
+        updateExplosions();
+    }
+
+    private void updateEnemies(int playerCenterX, int playerCenterY) {
+        for (Enemy enemy : room.enemies) {
+            if (!enemy.alive) {
+                continue;
             }
-            if (e.cd-- <= 0) {
-                double spd = 3.75;
-                Bullet b = new Bullet();
-                b.x = e.x; b.y = e.y;
-                double l = Math.max(1e-6, Math.hypot(dx, dy));
-                b.vx = dx / l * spd;
-                b.vy = dy / l * spd;
-                bullets.add(b);
-                e.cd = 60 + rng.nextInt(40);
-            }
+            pursuePlayer(enemy, playerCenterX, playerCenterY);
+            attemptEnemyAttack(enemy, playerCenterX, playerCenterY);
         }
+    }
 
-        for (Bullet b : bullets) {
-            if (!b.alive) continue;
-            b.x += b.vx;
-            b.y += b.vy;
-            if (b.x < 0 || b.y < 0 || b.x >= COLS*TILE || b.y >= ROWS*TILE) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); continue; }
-            int tx = (int)(b.x) / TILE;
-            int ty = (int)(b.y) / TILE;
-            if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) {
-                if (room.g[tx][ty] == T.WALL) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); }
+    private void pursuePlayer(Enemy enemy, int playerCenterX, int playerCenterY) {
+        int dx = playerCenterX - enemy.x;
+        int dy = playerCenterY - enemy.y;
+        double distance = Math.hypot(dx, dy);
+        if (distance <= 1) {
+            return;
+        }
+        int moveX = (int) Math.round(dx / distance * ENEMY_MOVE_SPEED);
+        int moveY = (int) Math.round(dy / distance * ENEMY_MOVE_SPEED);
+        attemptEnemyMove(enemy, moveX, 0);
+        attemptEnemyMove(enemy, 0, moveY);
+    }
+
+    private void attemptEnemyAttack(Enemy enemy, int playerCenterX, int playerCenterY) {
+        if (enemy.cd-- > 0) {
+            return;
+        }
+        Bullet bullet = createBullet(enemy.x, enemy.y, playerCenterX - enemy.x, playerCenterY - enemy.y, ENEMY_PROJECTILE_SPEED);
+        bullets.add(bullet);
+        enemy.cd = ENEMY_COOLDOWN_BASE + rng.nextInt(ENEMY_COOLDOWN_VARIATION);
+    }
+
+    private void updateEnemyBullets() {
+        for (Bullet bullet : bullets) {
+            if (!bullet.alive) {
+                continue;
             }
-            // Player hit detection (circle vs rect)
-            if (player != null && intersectsCircleRect(b.x, b.y, b.r, player)) {
+            advanceBullet(bullet);
+            if (!bullet.alive) {
+                continue;
+            }
+            if (intersectsCircleRect(bullet.x, bullet.y, bullet.r, player)) {
                 if (iFrames == 0) {
                     playerHP = Math.max(0, playerHP - 1);
-                    iFrames = 40;
-                    if (playerHP <= 0) onPlayerDeath();
+                    iFrames = PLAYER_DAMAGE_IFRAMES;
+                    if (playerHP <= 0) {
+                        onPlayerDeath();
+                    }
                 }
-                b.alive = false; explosions.add(makeExplosion(b.x, b.y));
+                bullet.alive = false;
+                explosions.add(makeExplosion(bullet.x, bullet.y));
             }
         }
-        bullets.removeIf(bb -> !bb.alive);
+        bullets.removeIf(bullet -> !bullet.alive);
+    }
 
-        // Player bullets
-        for (Bullet b : playerBullets) {
-            if (!b.alive) continue;
-            b.x += b.vx;
-            b.y += b.vy;
-            if (b.x < 0 || b.y < 0 || b.x >= COLS*TILE || b.y >= ROWS*TILE) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); continue; }
-            int tx = (int)(b.x) / TILE;
-            int ty = (int)(b.y) / TILE;
-            if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) {
-                if (room.g[tx][ty] == T.WALL) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); continue; }
+    private void updatePlayerBullets() {
+        for (Bullet bullet : playerBullets) {
+            if (!bullet.alive) {
+                continue;
             }
-            // enemy collision (circle vs enemy AABB simplified)
-            for (Enemy e : room.enemies) {
-                if (!b.alive) break;
-                int ex0 = e.x - e.size/2, ey0 = e.y - e.size/2;
-                int ex1 = ex0 + e.size, ey1 = ey0 + e.size;
-                if (b.x >= ex0 && b.x <= ex1 && b.y >= ey0 && b.y <= ey1) {
-                    b.alive = false; explosions.add(makeExplosion(b.x, b.y));
-                    // remove enemy on hit
-                    e.size = 0; // mark for removal
-                }
+            advanceBullet(bullet);
+            if (!bullet.alive) {
+                continue;
+            }
+            if (handleEnemyHit(bullet)) {
+                bullet.alive = false;
+                explosions.add(makeExplosion(bullet.x, bullet.y));
             }
         }
-        playerBullets.removeIf(bb -> !bb.alive);
-        room.enemies.removeIf(e -> e.size <= 0);
-        dropKeyIfEligible(room);
+        playerBullets.removeIf(bullet -> !bullet.alive);
+    }
 
-        // explosions advance
-        for (Explosion ex : explosions) ex.age++;
-        explosions.removeIf(ex -> ex.age >= ex.life);
+    private boolean handleEnemyHit(Bullet bullet) {
+        for (Enemy enemy : room.enemies) {
+            if (!enemy.alive) {
+                continue;
+            }
+            int half = enemy.size / 2;
+            int ex0 = enemy.x - half;
+            int ey0 = enemy.y - half;
+            int ex1 = ex0 + enemy.size;
+            int ey1 = ey0 + enemy.size;
+            if (bullet.x >= ex0 && bullet.x <= ex1 && bullet.y >= ey0 && bullet.y <= ey1) {
+                enemy.alive = false;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void cleanUpDefeatedEnemies() {
+        room.enemies.removeIf(enemy -> !enemy.alive);
+    }
+
+    private void advanceBullet(Bullet bullet) {
+        bullet.x += bullet.vx;
+        bullet.y += bullet.vy;
+        if (resolveBulletEnvironmentCollision(bullet)) {
+            bullet.alive = false;
+        }
+    }
+
+    private boolean resolveBulletEnvironmentCollision(Bullet bullet) {
+        if (isOutsideRoomBounds(bullet.x, bullet.y)) {
+            explosions.add(makeExplosion(bullet.x, bullet.y));
+            return true;
+        }
+        int tileX = (int) bullet.x / TILE;
+        int tileY = (int) bullet.y / TILE;
+        if (tileX >= 0 && tileX < COLS && tileY >= 0 && tileY < ROWS) {
+            if (room.g[tileX][tileY] == T.WALL) {
+                explosions.add(makeExplosion(bullet.x, bullet.y));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isOutsideRoomBounds(double x, double y) {
+        return x < 0 || y < 0 || x >= COLS * TILE || y >= ROWS * TILE;
+    }
+
+    private Bullet createBullet(double originX, double originY, double dirX, double dirY, double speed) {
+        Bullet bullet = new Bullet();
+        bullet.x = originX;
+        bullet.y = originY;
+        double magnitude = Math.max(EPSILON, Math.hypot(dirX, dirY));
+        bullet.vx = dirX / magnitude * speed;
+        bullet.vy = dirY / magnitude * speed;
+        return bullet;
+    }
+
+    private void updateExplosions() {
+        for (Explosion explosion : explosions) {
+            explosion.age++;
+        }
+        explosions.removeIf(explosion -> explosion.age >= explosion.life);
     }
 
     private void dropKeyIfEligible(Room r) {
@@ -477,8 +571,8 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     private void onPlayerDeath() {
         SwingUtilities.invokeLater(() -> {
             // Respawn at origin room with full HP and brief invulnerability
-            playerHP = 5;
-            iFrames = 60;
+            playerHP = PLAYER_MAX_HP;
+            iFrames = PLAYER_RESPAWN_IFRAMES;
             up = down = left = right = false;
             inBoss = false;
             bullets.clear();
@@ -520,7 +614,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
                 }
                 f.dispose();
                 inBoss = false;
-                iFrames = 60; // grace on return
+                iFrames = PLAYER_RESPAWN_IFRAMES; // grace on return
                 timer.start();
                 requestFocusInWindow();
             }));
@@ -539,32 +633,30 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     }
 
     private void shootPlayerBullet() {
-        Bullet b = new Bullet();
-        int pcx = player.x + player.width/2;
-        int pcy = player.y + player.height/2;
-        b.x = pcx; b.y = pcy;
-        double dx = mouseX - pcx;
-        double dy = mouseY - pcy;
-        double l = Math.max(1e-6, Math.hypot(dx, dy));
-        double spd = 7.0;
-        b.vx = dx / l * spd;
-        b.vy = dy / l * spd;
-        b.r = 4;
-        playerBullets.add(b);
+        if (player == null) {
+            return;
+        }
+        int pcx = player.x + player.width / 2;
+        int pcy = player.y + player.height / 2;
+        Bullet bullet = createBullet(pcx, pcy, mouseX - pcx, mouseY - pcy, PLAYER_PROJECTILE_SPEED);
+        playerBullets.add(bullet);
     }
 
     // ---- file-system sprite loading ----
     private static BufferedImage[] loadSequenceFS(String prefix, int from, int toInclusive) {
-        java.util.List<BufferedImage> list = new java.util.ArrayList<>();
+        List<BufferedImage> frames = new ArrayList<>();
         for (int i = from; i <= toInclusive; i++) {
-            File f = new File(prefix + i + ".png");
-            if (f.exists()) {
-                try {
-                    list.add(ImageIO.read(f));
-                } catch (Exception ignored) {}
+            Path path = Paths.get(prefix + i + ".png");
+            if (Files.notExists(path)) {
+                continue;
+            }
+            try {
+                frames.add(ImageIO.read(path.toFile()));
+            } catch (IOException ex) {
+                LOGGER.log(Level.WARNING, "Unable to load sprite frame {0}: {1}", new Object[]{path, ex.getMessage()});
             }
         }
-        return list.isEmpty() ? null : list.toArray(new BufferedImage[0]);
+        return frames.isEmpty() ? null : frames.toArray(new BufferedImage[0]);
     }
 
     /** Create a fresh room with outer walls and 1–3 total doors (including the entrance, if any). */
