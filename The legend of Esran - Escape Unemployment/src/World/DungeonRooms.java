@@ -3,9 +3,15 @@ package World;
 import World.gfx.DungeonTextures;
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
+import launcher.ControlAction;
+import launcher.ControlsProfile;
+import launcher.GameLauncher;
+import launcher.GameSettings;
+import launcher.LanguageBundle;
 import security.GameSecurity;
 
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -13,12 +19,10 @@ import javax.swing.Timer;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.Composite;
-import java.awt.Font;
+import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
-import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 
@@ -29,10 +33,9 @@ import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 
-import java.awt.geom.GeneralPath;
-
 import java.awt.image.BufferedImage;
-import java.io.File;
+import java.io.Serial;
+import java.io.Serializable;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,23 +44,17 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.Locale;
-
-import javax.imageio.ImageIO;
+import java.util.function.Consumer;
 
 /**
- * Zelda-style, one-room view with persistent rooms.
- * - Arrow keys / WASD to move (no diagonal movement).
- * - Walking through an edge door loads the adjacent room.
- *   Existing rooms are remembered; backtracking restores the exact same room.
- * - Each new room starts with 1–3 doors (entrance counts as one).
- * - R = reroll current room (keeps doors the same but re-rolls obstacles)
- * - Esc = quit
+ * Top-down dungeon crawler panel with persistent rooms and procedural generation.
+ * Player movement, combat, and interactions obey the control bindings supplied by {@link ControlsProfile}.
  */
-public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
+public class DungeonRooms extends JPanel implements ActionListener, KeyListener {
 
     // ----- Tunables -----
     static final int TILE = 36;           // pixels per tile
@@ -71,7 +68,9 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     enum T { VOID, FLOOR, WALL, DOOR }
     enum Dir { N, S, W, E }
 
-    static class Enemy {
+    static class Enemy implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         int x, y;
         int size = (int)(TILE * 0.6);
         int cd = 0;
@@ -79,37 +78,49 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         EnemySpawn spawn;
     }
 
-    static class Bullet {
+    static class Bullet implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         double x, y;
         double vx, vy;
         int r = 4;
         boolean alive = true;
     }
 
-    static class Explosion {
+    static class Explosion implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         double x, y;
         int age = 0;
         int life = 18;
         int maxR = 22;
     }
 
-    static class KeyPickup {
+    static class KeyPickup implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         int x, y;
         int r = 12;
     }
 
-    static class EnemySpawn {
+    static class EnemySpawn implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         int x, y;
         boolean defeated = false;
     }
 
-    static class BossEncounter {
+    static class BossEncounter implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         BossBattlePanel.BossKind kind;
         boolean defeated = false;
         boolean rewardClaimed = false;
     }
 
-    static class Room {
+    static class Room implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
         T[][] g = new T[COLS][ROWS];
         Set<Dir> doors = EnumSet.noneOf(Dir.class);
         List<Enemy> enemies = new ArrayList<>();
@@ -125,18 +136,25 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         }
     }
 
-    private static final String STORY_TEXT = "Quest: Rescue Princess Elara from the Verdant Depths";
-    private static final int MESSAGE_DURATION = FPS * 3;
+    private static final int MESSAGE_SECONDS = 3;
 
-    private final Timer timer = new Timer(1000 / FPS, this);
-    private final Random rng = new Random();
-    private final SecureRandom secureRandom = GameSecurity.secureRandom();
+    private final GameSettings settings;
+    private final ControlsProfile controls;
+    private final LanguageBundle texts;
+    private final Consumer<DungeonRoomsSnapshot> saveHandler;
+    private final Runnable exitHandler;
+
+    private final Timer timer;
+    private final int messageDurationTicks;
+
+    private Random rng = new Random();
+    private SecureRandom secureRandom = GameSecurity.secureRandom();
 
     // Persistent world: integer-grid of rooms using world coordinates
-    private final Map<Point, Room> world = new HashMap<>();
-    private final Map<Point, BossEncounter> bossEncounters = new HashMap<>();
-    private final Set<Point> visited = new HashSet<>();
-    private final List<BossBattlePanel.BossKind> bossPool = new ArrayList<>();
+    private Map<Point, Room> world = new HashMap<>();
+    private Map<Point, BossEncounter> bossEncounters = new HashMap<>();
+    private Set<Point> visited = new HashSet<>();
+    private List<BossBattlePanel.BossKind> bossPool = new ArrayList<>();
     private Point worldPos = new Point(0, 0);   // current room coordinate
     private int roomsVisited = 1;
 
@@ -144,13 +162,10 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     private Rectangle player;          // player rectangle in pixels
     private boolean up, down, left, right;
 
-    // Optional textures loader (replaces the old tilesheet code)
     private DungeonTextures textures;
-
-    // Sprites from resources for player/enemies
-    private BufferedImage[] playerIdleFrames;   // Knight male idle
-    private BufferedImage[] enemyIdleFrames;    // Imp idle
-    private BufferedImage[] bossIdleFrames;     // Big zombie idle
+    private BufferedImage[] playerIdleFrames;
+    private BufferedImage[] enemyIdleFrames;
+    private BufferedImage[] bossIdleFrames;
     private int animTick = 0;
     private int mouseX = COLS * TILE / 2, mouseY = ROWS * TILE / 2;
     private final List<Bullet> bullets = new ArrayList<>();       // enemy bullets
@@ -162,37 +177,167 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     private String statusMessage = "";
     private int statusTicks = 0;
     private volatile boolean inBoss = false;
+    private boolean paused;
+    private Dimension renderSize;
+    private double scaleX = 1.0;
+    private double scaleY = 1.0;
 
-    public ZeldaRooms() {
+    public DungeonRooms(GameSettings settings,
+                        ControlsProfile controls,
+                        LanguageBundle texts,
+                        Consumer<DungeonRoomsSnapshot> saveHandler,
+                        Runnable exitHandler,
+                        DungeonRoomsSnapshot snapshot) {
         GameSecurity.verifyIntegrity();
-        initializeBossPool();
+        this.settings = settings == null ? new GameSettings() : new GameSettings(settings);
+        this.controls = controls == null ? new ControlsProfile() : new ControlsProfile(controls);
+        this.texts = texts == null ? new LanguageBundle(this.settings.language()) : texts;
+        this.saveHandler = saveHandler == null ? snapshotIgnored -> { } : saveHandler;
+        this.exitHandler = exitHandler == null ? () -> { } : exitHandler;
+        this.timer = new Timer(1000 / Math.max(30, this.settings.refreshRate()), this);
+        this.messageDurationTicks = Math.max(1, this.settings.refreshRate() * MESSAGE_SECONDS);
+        this.renderSize = this.settings.resolution();
 
-        setPreferredSize(new java.awt.Dimension(COLS * TILE, ROWS * TILE));
+        setPreferredSize(new Dimension(renderSize));
         setBackground(BG);
         setFocusable(true);
         addKeyListener(this);
+        updateScale();
 
-        // Create the starting room (center of the world)
+        addMouseMotionListener(new MouseMotionAdapter() {
+            @Override public void mouseMoved(MouseEvent e) {
+                Point p = toGameCoords(e.getX(), e.getY());
+                mouseX = p.x;
+                mouseY = p.y;
+            }
+
+            @Override public void mouseDragged(MouseEvent e) {
+                Point p = toGameCoords(e.getX(), e.getY());
+                mouseX = p.x;
+                mouseY = p.y;
+            }
+        });
+
+        if (snapshot != null) {
+            restoreFromSnapshot(snapshot);
+        } else {
+            initializeNewRun();
+        }
+
+        timer.start();
+    }
+
+    private void initializeNewRun() {
+        rng = new Random();
+        secureRandom = GameSecurity.secureRandom();
+        world = new HashMap<>();
+        bossEncounters = new HashMap<>();
+        visited = new HashSet<>();
+        bossPool = new ArrayList<>();
+        worldPos = new Point(0, 0);
+        roomsVisited = 1;
+        bullets.clear();
+        playerBullets.clear();
+        explosions.clear();
+        up = down = left = right = false;
+        playerHP = 5;
+        iFrames = 0;
+        keysHeld = 0;
+        statusMessage = "";
+        statusTicks = 0;
+        inBoss = false;
+        paused = false;
+        textures = DungeonTextures.procedural();
+        playerIdleFrames = createIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
+        enemyIdleFrames = createIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        bossIdleFrames = createIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+        initializeBossPool();
         room = makeOrGetRoom(worldPos, null);
         spawnEnemiesIfNeeded(worldPos, room);
         placePlayerAtCenter();
-        timer.start();
-
-        // New: try to load textures (falls back to flat colors if not found)
-        textures = DungeonTextures.autoDetect();
-
-        // Load character sprite sequences from src/resources (filesystem)
-        playerIdleFrames = loadSequenceFS("src/resources/sprites/Knight/Idle/knight_m_idle_anim_f", 0, 3);
-        enemyIdleFrames  = loadSequenceFS("src/resources/sprites/Imp/imp_idle_anim_f", 0, 3);
-        bossIdleFrames   = loadSequenceFS("src/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 0, 3);
-
         visited.add(new Point(worldPos));
-        showMessage("The king begs: save Princess Elara hidden deep within!");
+        showMessage(texts.text("intro"));
+    }
 
-        addMouseMotionListener(new MouseMotionAdapter() {
-            @Override public void mouseMoved(MouseEvent e){ mouseX=e.getX(); mouseY=e.getY(); }
-            @Override public void mouseDragged(MouseEvent e){ mouseX=e.getX(); mouseY=e.getY(); }
-        });
+    private void restoreFromSnapshot(DungeonRoomsSnapshot snapshot) {
+        textures = DungeonTextures.procedural();
+        playerIdleFrames = createIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
+        enemyIdleFrames = createIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        bossIdleFrames = createIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
+
+        world = snapshot.world();
+        bossEncounters = snapshot.bossEncounters();
+        visited = snapshot.visited();
+        bossPool = snapshot.bossPool();
+        worldPos = snapshot.worldPos();
+        roomsVisited = snapshot.roomsVisited();
+        room = snapshot.currentRoom();
+        player = snapshot.playerRect();
+        if (player == null) {
+            placePlayerAtCenter();
+        }
+        up = snapshot.moveUp();
+        down = snapshot.moveDown();
+        left = snapshot.moveLeft();
+        right = snapshot.moveRight();
+        bullets.clear();
+        bullets.addAll(snapshot.enemyBullets());
+        playerBullets.clear();
+        playerBullets.addAll(snapshot.playerBullets());
+        explosions.clear();
+        explosions.addAll(snapshot.explosions());
+        playerHP = snapshot.playerHP();
+        iFrames = snapshot.iFrames();
+        keysHeld = snapshot.keysHeld();
+        statusMessage = snapshot.statusMessage() == null ? "" : snapshot.statusMessage();
+        statusTicks = snapshot.statusTicks();
+        inBoss = snapshot.inBoss();
+        animTick = snapshot.animTick();
+        mouseX = snapshot.mouseX();
+        mouseY = snapshot.mouseY();
+        rng = snapshot.rng();
+        secureRandom = snapshot.secureRandom();
+        paused = false;
+    }
+
+    private void updateScale() {
+        scaleX = renderSize.getWidth() / (double) (COLS * TILE);
+        scaleY = renderSize.getHeight() / (double) (ROWS * TILE);
+        if (Double.isNaN(scaleX) || scaleX <= 0) {
+            scaleX = 1.0;
+        }
+        if (Double.isNaN(scaleY) || scaleY <= 0) {
+            scaleY = 1.0;
+        }
+    }
+
+    private Point toGameCoords(int x, int y) {
+        int gx = (int) Math.round(x / scaleX);
+        int gy = (int) Math.round(y / scaleY);
+        return new Point(Math.max(0, Math.min(COLS * TILE, gx)), Math.max(0, Math.min(ROWS * TILE, gy)));
+    }
+
+    private BufferedImage[] createIdleFrames(Color base, Color outline) {
+        BufferedImage[] frames = new BufferedImage[4];
+        for (int i = 0; i < frames.length; i++) {
+            BufferedImage img = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(base);
+                int wobble = i % 2;
+                g.fillOval(4, 6 + wobble, 24, 24 - wobble);
+                g.setColor(outline);
+                g.setStroke(new BasicStroke(2f));
+                g.drawOval(4, 6 + wobble, 24, 24 - wobble);
+                g.setColor(new Color(255, 255, 255, 120));
+                g.fillOval(10, 10 + wobble, 8, 8);
+            } finally {
+                g.dispose();
+            }
+            frames[i] = img;
+        }
+        return frames;
     }
 
     // ======= Room creation / persistence =======
@@ -394,7 +539,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         key.x = x;
         key.y = y;
         r.keyPickups.add(key);
-        showMessage("An enemy dropped a key!");
+        showMessage(texts.text("key_drop"));
     }
 
     private void updateRoomClearState(Room r) {
@@ -408,7 +553,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         }
         if (allDefeated) {
             r.cleared = true;
-            showMessage("Room cleared! Gather the keys and move on.");
+            showMessage(texts.text("room_cleared"));
         }
     }
 
@@ -425,7 +570,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             if (dx * dx + dy * dy <= maxR * maxR) {
                 it.remove();
                 keysHeld++;
-                showMessage("You obtained a dungeon key! Keys: " + keysHeld);
+                showMessage(texts.text("key_obtained", keysHeld));
                 updateRoomClearState(room);
             }
         }
@@ -435,7 +580,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         if (inBoss) return;
         BossEncounter encounter = bossEncounters.get(worldPos);
         if (encounter != null && !encounter.defeated) {
-            showMessage("Boss challenge: " + formatBossName(encounter.kind));
+            showMessage(texts.text("boss_challenge", formatBossName(encounter.kind)));
             triggerBossEncounter(encounter);
         }
     }
@@ -446,7 +591,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             statusTicks = 0;
         } else {
             statusMessage = message;
-            statusTicks = MESSAGE_DURATION;
+            statusTicks = messageDurationTicks;
         }
     }
 
@@ -483,7 +628,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         if (encounter == null || encounter.rewardClaimed) return;
         encounter.rewardClaimed = true;
         keysHeld++;
-        showMessage("Victory! You claimed a royal key. Keys: " + keysHeld);
+        showMessage(texts.text("victory_key", keysHeld));
     }
 
     private static String formatBossName(BossBattlePanel.BossKind kind) {
@@ -537,7 +682,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             spawnEnemiesIfNeeded(worldPos, room);
             visited.add(new Point(worldPos));
             placePlayerAtCenter();
-            showMessage("You awaken at the gate. Princess Elara still needs you!");
+            showMessage(texts.text("respawn"));
             repaint();
             requestFocusInWindow();
         });
@@ -555,7 +700,7 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
                     encounter.defeated = true;
                     grantBossReward(encounter);
                 } else {
-                    showMessage("The boss repelled you! Regroup at the entrance.");
+                    showMessage(texts.text("boss_repelled"));
                     onPlayerDeath();
                 }
                 f.dispose();
@@ -594,19 +739,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     }
 
     // ---- file-system sprite loading ----
-    private static BufferedImage[] loadSequenceFS(String prefix, int from, int toInclusive) {
-        java.util.List<BufferedImage> list = new java.util.ArrayList<>();
-        for (int i = from; i <= toInclusive; i++) {
-            File f = new File(prefix + i + ".png");
-            if (f.exists()) {
-                try {
-                    list.add(ImageIO.read(f));
-                } catch (Exception ignored) {}
-            }
-        }
-        return list.isEmpty() ? null : list.toArray(new BufferedImage[0]);
-    }
-
     /** Create a fresh room with outer walls and 1–3 total doors (including the entrance, if any). */
     private Room generateNewRoom(Dir mustHaveEntrance) {
         Room r = new Room();
@@ -767,6 +899,9 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
 
     @Override
     public void actionPerformed(ActionEvent e) {
+        if (paused || inBoss) {
+            return;
+        }
         animTick++;
         if (iFrames > 0) iFrames--;
         updatePlayer();
@@ -871,13 +1006,13 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
         boolean consumedKey = false;
         if (room.lockedDoors.contains(exitSide)) {
             if (keysHeld <= 0) {
-                showMessage("The door is locked. You need a key.");
+                showMessage(texts.text("door_locked"));
                 return;
             }
             keysHeld--;
             consumedKey = true;
             room.lockedDoors.remove(exitSide);
-            showMessage("You unlock the door. Keys left: " + keysHeld);
+            showMessage(texts.text("door_unlock", keysHeld));
         }
 
         // Compute target world coordinate
@@ -913,13 +1048,13 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             BossEncounter encounter = ensureBossFor(worldPos);
             if (encounter != null) {
                 prepareBossRoom(nextRoom);
-                showMessage("A boss stands in your way: " + formatBossName(encounter.kind));
+                showMessage(texts.text("boss_warning", formatBossName(encounter.kind)));
             }
         } else if (isNewVisit && consumedKey) {
             BossEncounter encounter = ensureBossFor(worldPos);
             if (encounter != null) {
                 prepareBossRoom(nextRoom);
-                showMessage("The unlocked path reveals a boss: " + formatBossName(encounter.kind));
+                showMessage(texts.text("boss_unlock", formatBossName(encounter.kind)));
             }
         }
 
@@ -940,24 +1075,40 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        Graphics2D gg = (Graphics2D) g;
-        gg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        Graphics2D worldGraphics = (Graphics2D) g.create();
+        Graphics2D overlay = (Graphics2D) g.create();
+        try {
+            worldGraphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            overlay.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        // Tiles
+            scaleX = getWidth() / (double) (COLS * TILE);
+            scaleY = getHeight() / (double) (ROWS * TILE);
+            if (scaleX <= 0 || Double.isNaN(scaleX)) scaleX = 1.0;
+            if (scaleY <= 0 || Double.isNaN(scaleY)) scaleY = 1.0;
+            worldGraphics.scale(scaleX, scaleY);
+
+            drawWorld(worldGraphics);
+            drawHud(overlay);
+        } finally {
+            worldGraphics.dispose();
+            overlay.dispose();
+        }
+    }
+
+    private void drawWorld(Graphics2D gg) {
         for (int x = 0; x < COLS; x++) {
             for (int y = 0; y < ROWS; y++) {
                 int px = x * TILE, py = y * TILE;
                 T t = room.g[x][y];
                 if (textures != null && textures.isReady()) {
                     int fCount = Math.max(1, textures.floorVariants());
-                    // Simple deterministic hash per tile for variety
                     int fIdx = Math.floorMod(x * 17 + y * 31, fCount);
-                    int wIdx = 0; // force wall_1 only
+                    int wIdx = Math.floorMod(x * 11 + y * 7, Math.max(1, textures.wallVariants()));
                     switch (t) {
                         case FLOOR -> gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
                         case WALL  -> gg.drawImage(textures.wallVariant(wIdx),  px, py, TILE, TILE, null);
                         case DOOR  -> {
-                            gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
+                            gg.drawImage(textures.doorFloor(), px, py, TILE, TILE, null);
                             gg.setColor(new Color(220, 172, 60));
                             if (x == 0 || x == COLS - 1)
                                 gg.fillRect(px + (x == 0 ? 0 : TILE - 6), py + 6, 6, TILE - 12);
@@ -971,48 +1122,19 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
                         default -> {}
                     }
                 } else {
-                    switch (t) {
-                        case FLOOR -> {
-                            gg.setColor(new Color(18, 64, 78));
-                            gg.fillRect(px, py, TILE, TILE);
-                            gg.setColor(new Color(10, 45, 55));
-                            gg.drawRect(px, py, TILE, TILE);
-                        }
-                        case WALL -> {
-                            gg.setColor(new Color(36, 132, 156));
-                            gg.fillRect(px, py, TILE, TILE);
-                        }
-                        case DOOR -> {
-                            gg.setColor(new Color(18, 64, 78));
-                            gg.fillRect(px, py, TILE, TILE);
-                            gg.setColor(new Color(220, 172, 60));
-                            if (x == 0 || x == COLS - 1)
-                                gg.fillRect(px + (x == 0 ? 0 : TILE - 6), py + 6, 6, TILE - 12);
-                            if (y == 0 || y == ROWS - 1)
-                                gg.fillRect(px + 6, py + (y == 0 ? 0 : TILE - 6), TILE - 12, 6);
-                            Dir doorDir = dirForTile(x, y);
-                            if (doorDir != null && room.lockedDoors.contains(doorDir)) {
-                                drawPadlock(gg, px, py);
-                            }
-                        }
-                        default -> {}
-                    }
+                    gg.setColor(new Color(18, 64, 78));
+                    gg.fillRect(px, py, TILE, TILE);
                 }
             }
         }
 
-        // Keys
         for (KeyPickup key : room.keyPickups) {
             gg.setColor(new Color(255, 215, 82));
             gg.fillOval(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
             gg.setColor(new Color(140, 90, 30));
             gg.drawOval(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
-            gg.drawLine(key.x + key.r / 2, key.y, key.x + key.r + 2, key.y);
-            gg.drawLine(key.x + key.r - 2, key.y - 2, key.x + key.r + 4, key.y - 2);
-            gg.drawLine(key.x + key.r - 2, key.y + 2, key.x + key.r + 4, key.y + 2);
         }
 
-        // Enemies
         for (Enemy e : room.enemies) {
             if (!e.alive) continue;
             if (enemyIdleFrames != null && enemyIdleFrames.length > 0) {
@@ -1021,60 +1143,68 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
             } else {
                 gg.setColor(new Color(200,60,60));
                 gg.fillOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
-                gg.setColor(Color.BLACK);
-                gg.drawOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
             }
         }
 
-        // Player
         if (playerIdleFrames != null && playerIdleFrames.length > 0){
             int idx = (animTick / 10) % playerIdleFrames.length;
             gg.drawImage(playerIdleFrames[idx], player.x, player.y, player.width, player.height, null);
         } else {
-            gg.setColor(new Color(255,214,102)); gg.fillOval(player.x,player.y,player.width,player.height);
-            gg.setColor(Color.BLACK); gg.drawOval(player.x,player.y,player.width,player.height);
+            gg.setColor(new Color(255,214,102));
+            gg.fillOval(player.x,player.y,player.width,player.height);
         }
 
-        // Bullets (enemy and player)
         gg.setColor(new Color(255,240,120));
         for (Bullet b : bullets) if (b.alive) gg.fillOval((int)(b.x - b.r), (int)(b.y - b.r), b.r*2, b.r*2);
         gg.setColor(new Color(120,210,255));
         for (Bullet b : playerBullets) if (b.alive) gg.fillOval((int)(b.x - b.r), (int)(b.y - b.r), b.r*2, b.r*2);
 
-        // Explosions
         for (Explosion ex : explosions) {
             float t = ex.age / (float)Math.max(1, ex.life);
             int r = (int)(ex.maxR * t);
             int alpha = (int)(180 * (1.0f - t));
             alpha = Math.max(0, Math.min(255, alpha));
-            ((Graphics2D)g).setComposite(AlphaComposite.SrcOver.derive(alpha/255f));
+            gg.setComposite(AlphaComposite.SrcOver.derive(alpha/255f));
             gg.setColor(new Color(255, 200, 80));
             gg.fillOval((int)ex.x - r, (int)ex.y - r, r*2, r*2);
             gg.setColor(new Color(255, 240, 160));
             gg.drawOval((int)ex.x - r, (int)ex.y - r, r*2, r*2);
-            ((Graphics2D)g).setComposite(AlphaComposite.SrcOver);
+            gg.setComposite(AlphaComposite.SrcOver);
+        }
+    }
+
+    private void drawHud(Graphics2D overlay) {
+        overlay.setColor(new Color(255, 255, 255, 210));
+        String controlsLine = String.format("Move: %s/%s/%s/%s   Shoot: %s   Reroll: %s   Pause: %s",
+                keyName(ControlAction.MOVE_UP),
+                keyName(ControlAction.MOVE_DOWN),
+                keyName(ControlAction.MOVE_LEFT),
+                keyName(ControlAction.MOVE_RIGHT),
+                keyName(ControlAction.SHOOT),
+                keyName(ControlAction.REROLL),
+                keyName(ControlAction.PAUSE));
+        overlay.drawString("HP: " + playerHP + (iFrames>0?" (invul)":""), 10, 18);
+        overlay.drawString(controlsLine, 10, 34);
+        overlay.drawString(String.format("Room (%d,%d)  Keys: %d", worldPos.x, worldPos.y, keysHeld), 10, 50);
+        overlay.drawString(texts.text("story"), 10, 66);
+        if (isBossRoom(worldPos)) {
+            overlay.drawString("Guardian Lair", getWidth() - 160, 18);
         }
 
-        // HUD
-        gg.setColor(new Color(255, 255, 255, 190));
-        gg.drawString("HP: " + playerHP + (iFrames>0?" (invul)":"") + "   Move: Arrows/WASD (no diagonal)   Space: shoot   R: reroll obstacles   Esc: quit", 10, 18);
-        gg.drawString("Room (" + worldPos.x + "," + worldPos.y + ")  Doors: " + room.doors
-                + "  Enemies: " + room.enemies.size()
-                + "  Bullets: " + (bullets.size() + playerBullets.size()), 10, 34);
-        gg.drawString("Keys: " + keysHeld, getWidth() - 120, 34);
-        gg.drawString(STORY_TEXT, 10, 52);
-        gg.drawString("Mode: Endless | Unlock doors to face random bosses", 10, 68);
-        if (isBossRoom(worldPos)) gg.drawString("Boss Chamber", getWidth()-140, 18);
         if (!statusMessage.isBlank()) {
             int boxWidth = getWidth() - 20;
             int boxHeight = 26;
             int boxX = 10;
             int boxY = getHeight() - boxHeight - 10;
-            gg.setColor(new Color(0, 0, 0, 160));
-            gg.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 10, 10);
-            gg.setColor(new Color(255, 255, 255, 220));
-            gg.drawString(statusMessage, boxX + 10, boxY + boxHeight - 8);
+            overlay.setColor(new Color(0, 0, 0, 160));
+            overlay.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 10, 10);
+            overlay.setColor(new Color(255, 255, 255, 220));
+            overlay.drawString(statusMessage, boxX + 10, boxY + boxHeight - 8);
         }
+    }
+
+    private String keyName(ControlAction action) {
+        return KeyEvent.getKeyText(controls.keyFor(action));
     }
 
     private void drawPadlock(Graphics2D gg, int px, int py) {
@@ -1093,32 +1223,123 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
 
     @Override
     public void keyPressed(KeyEvent e) {
-        switch (e.getKeyCode()) {
-            case KeyEvent.VK_W, KeyEvent.VK_UP -> up = true;
-            case KeyEvent.VK_S, KeyEvent.VK_DOWN -> down = true;
-            case KeyEvent.VK_A, KeyEvent.VK_LEFT -> left = true;
-            case KeyEvent.VK_D, KeyEvent.VK_RIGHT -> right = true;
-            case KeyEvent.VK_SPACE -> shootPlayerBullet();
-            case KeyEvent.VK_R -> {            // reroll current room obstacles, keep doors
-                room = rerollObstacles(room);
-                repaint();
-            }
-            case KeyEvent.VK_ESCAPE -> System.exit(0);
+        if (matches(e, ControlAction.MOVE_UP)) {
+            up = true;
+        }
+        if (matches(e, ControlAction.MOVE_DOWN)) {
+            down = true;
+        }
+        if (matches(e, ControlAction.MOVE_LEFT)) {
+            left = true;
+        }
+        if (matches(e, ControlAction.MOVE_RIGHT)) {
+            right = true;
+        }
+        if (matches(e, ControlAction.SHOOT)) {
+            shootPlayerBullet();
+        }
+        if (matches(e, ControlAction.REROLL)) {
+            room = rerollObstacles(room);
+            repaint();
+        }
+        if (matches(e, ControlAction.PAUSE)) {
+            showPauseMenu();
         }
     }
 
     @Override
     public void keyReleased(KeyEvent e) {
-        switch (e.getKeyCode()) {
-            case KeyEvent.VK_W, KeyEvent.VK_UP -> up = false;
-            case KeyEvent.VK_S, KeyEvent.VK_DOWN -> down = false;
-            case KeyEvent.VK_A, KeyEvent.VK_LEFT -> left = false;
-            case KeyEvent.VK_D, KeyEvent.VK_RIGHT -> right = false;
-        }
+        if (matches(e, ControlAction.MOVE_UP)) up = false;
+        if (matches(e, ControlAction.MOVE_DOWN)) down = false;
+        if (matches(e, ControlAction.MOVE_LEFT)) left = false;
+        if (matches(e, ControlAction.MOVE_RIGHT)) right = false;
     }
 
     @Override
     public void keyTyped(KeyEvent e) { }
+
+    private boolean matches(KeyEvent e, ControlAction action) {
+        int code = e.getKeyCode();
+        if (code == controls.keyFor(action)) {
+            return true;
+        }
+        return switch (action) {
+            case MOVE_UP -> code == KeyEvent.VK_UP;
+            case MOVE_DOWN -> code == KeyEvent.VK_DOWN;
+            case MOVE_LEFT -> code == KeyEvent.VK_LEFT;
+            case MOVE_RIGHT -> code == KeyEvent.VK_RIGHT;
+            default -> false;
+        };
+    }
+
+    private void showPauseMenu() {
+        if (paused) {
+            return;
+        }
+        paused = true;
+        timer.stop();
+        String[] options = {
+                texts.text("resume"),
+                texts.text("save_and_exit"),
+                texts.text("quit_without_saving")
+        };
+        int choice = JOptionPane.showOptionDialog(this, texts.text("pause_title"), texts.text("pause_title"),
+                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
+        if (choice == 1) {
+            try {
+                saveHandler.accept(snapshot());
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(this, "Unable to save: " + ex.getMessage(),
+                        texts.text("pause_title"), JOptionPane.ERROR_MESSAGE);
+                paused = false;
+                timer.start();
+                requestFocusInWindow();
+                return;
+            }
+            exitHandler.run();
+        } else if (choice == 2) {
+            exitHandler.run();
+        } else {
+            paused = false;
+            timer.start();
+            requestFocusInWindow();
+        }
+    }
+
+    public DungeonRoomsSnapshot snapshot() {
+        return new DungeonRoomsSnapshot(
+                world,
+                bossEncounters,
+                visited,
+                bossPool,
+                worldPos,
+                roomsVisited,
+                room,
+                player,
+                up,
+                down,
+                left,
+                right,
+                bullets,
+                playerBullets,
+                explosions,
+                playerHP,
+                iFrames,
+                keysHeld,
+                statusMessage,
+                statusTicks,
+                inBoss,
+                animTick,
+                mouseX,
+                mouseY,
+                rng,
+                secureRandom
+        );
+    }
+
+    public void shutdown() {
+        timer.stop();
+    }
 
     private Room rerollObstacles(Room r) {
         // Clear inside (except borders & doors), then re-add obstacles
@@ -1162,16 +1383,6 @@ public class ZeldaRooms extends JPanel implements ActionListener, KeyListener {
 
     // ---- Main launcher ----
     public static void main(String[] args) {
-        javax.swing.SwingUtilities.invokeLater(() -> {
-            javax.swing.JFrame f = new javax.swing.JFrame("Zelda Rooms");
-            ZeldaRooms p = new ZeldaRooms();
-            f.setDefaultCloseOperation(javax.swing.JFrame.EXIT_ON_CLOSE);
-            f.setContentPane(p);
-            f.pack();
-            f.setLocationRelativeTo(null);
-            f.setResizable(false);
-            f.setVisible(true);
-            p.requestFocusInWindow();
-        });
+        GameLauncher.main(args);
     }
 }

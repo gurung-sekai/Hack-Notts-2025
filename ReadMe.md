@@ -33,9 +33,11 @@ edited by Julil
 
 | File | Description |
 |------|--------------|
-| `ZeldaRooms.java` | Core game logic: room generation, rendering, and collision detection |
+| `DungeonRooms.java` | Core game logic: room generation, rendering, and collision detection |
 | `Player.java` | Handles player input, movement, HP, and attacks |
 | `Enemy.java` | Defines AI, attack behavior, and monster updates |
+| `launcher/GameLauncher.java` | Desktop launcher for resolution, refresh rate, language, and control bindings |
+| `World/DungeonRoomsSnapshot.java` | Serializable save-state used for resuming campaigns |
 
 Each component has a clearly separated responsibility, making the project scalable and easy to maintain.
 
@@ -176,7 +178,7 @@ When the player’s HP reaches 0:
 ## Architecture Diagram
 
 ```plaintext
-ZeldaRooms.java
+DungeonRooms.java
  ├── main() → initializes window and loop
  ├── generateRoom() → procedural layout logic
  ├── draw() → renders game elements

@@ -1,115 +1,84 @@
 package World.gfx;
 
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
-import javax.imageio.ImageIO;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
 
+/**
+ * Procedurally generated textures so the game avoids bundling external artwork.
+ */
 public final class DungeonTextures {
-    private boolean ready;
-    private BufferedImage floorSprite;
-    private BufferedImage wallSprite;
-    private BufferedImage[] floorCells; // loaded from folder if available
-    private BufferedImage[] wallCells;  // loaded from folder if available
-    private BufferedImage doorFloor;    // optional door floor tile if provided
+    private final BufferedImage[] floorCells;
+    private final BufferedImage[] wallCells;
+    private final BufferedImage doorFloor;
 
-    private DungeonTextures() {}
+    private DungeonTextures(BufferedImage[] floorCells, BufferedImage[] wallCells, BufferedImage doorFloor) {
+        this.floorCells = floorCells;
+        this.wallCells = wallCells;
+        this.doorFloor = doorFloor;
+    }
 
-    public static DungeonTextures autoDetect() {
-        DungeonTextures dt = new DungeonTextures();
-        // 1) Try folder-based variants first
-        dt.floorCells = loadFolderVariants("src/resources/tiles/floor", "floor_");
-        dt.wallCells  = loadFolderVariants("src/resources/tiles/wall",  "wall_");
-        dt.doorFloor  = tryReadFS("src/resources/tiles/floor/door_floor.png");
-
-        if ((dt.floorCells != null && dt.floorCells.length > 0) &&
-            (dt.wallCells != null && dt.wallCells.length > 0)) {
-            dt.ready = true;
-            return dt;
+    public static DungeonTextures procedural() {
+        BufferedImage[] floors = new BufferedImage[4];
+        BufferedImage[] walls = new BufferedImage[3];
+        for (int i = 0; i < floors.length; i++) {
+            floors[i] = makeTile(new Color(18 + i * 4, 64 + i * 3, 78 + i * 4), new Color(12, 42, 56));
         }
-
-        // 2) Fallback to single images/atlases
-        dt.floorSprite = tryReadFS("src/resources/tiles/atlas_floor-16x16.png");
-        if (dt.floorSprite == null) dt.floorSprite = tryReadFS("src/resources/tiles/Set 1.png");
-        dt.wallSprite  = tryReadFS("src/resources/tiles/atlas_walls_low-16x16.png");
-        if (dt.wallSprite == null) dt.wallSprite = tryReadFS("src/resources/tiles/Set 3.5.png");
-        dt.ready = (dt.floorSprite != null && dt.wallSprite != null);
-        return dt;
+        for (int i = 0; i < walls.length; i++) {
+            walls[i] = makeTile(new Color(46 + i * 6, 126 + i * 5, 146 + i * 4), new Color(28, 82, 96));
+        }
+        BufferedImage door = makeTile(new Color(38, 80, 92), new Color(24, 60, 70));
+        Graphics2D g = door.createGraphics();
+        try {
+            g.setColor(new Color(210, 178, 90));
+            g.setStroke(new BasicStroke(2f));
+            g.drawRect(4, 4, door.getWidth() - 8, door.getHeight() - 8);
+        } finally {
+            g.dispose();
+        }
+        return new DungeonTextures(floors, walls, door);
     }
 
-    public boolean isReady() { return ready; }
-    public BufferedImage floor() { return floorSprite; }
-    public BufferedImage wall() { return wallSprite; }
-    public BufferedImage doorFloor() { return doorFloor; }
+    public boolean isReady() {
+        return true;
+    }
 
-    // 16x16 cell slicing helpers
     public int floorVariants() {
-        if (floorCells != null && floorCells.length > 0) return floorCells.length;
-        return variantsFor(floorSprite, 16);
+        return floorCells.length;
     }
-    public int wallVariants()  {
-        if (wallCells != null && wallCells.length > 0) return wallCells.length;
-        return variantsFor(wallSprite, 16);
+
+    public int wallVariants() {
+        return wallCells.length;
     }
 
     public BufferedImage floorVariant(int index) {
-        if (floorCells != null && floorCells.length > 0) return floorCells[Math.floorMod(index, floorCells.length)];
-        return subcell(floorSprite, 16, index);
-    }
-    public BufferedImage wallVariant(int index)  {
-        if (wallCells != null && wallCells.length > 0) return wallCells[Math.floorMod(index, wallCells.length)];
-        return subcell(wallSprite, 16, index);
+        return floorCells[Math.floorMod(index, floorCells.length)];
     }
 
-    private static int variantsFor(BufferedImage sheet, int cell) {
-        if (sheet == null || cell <= 0) return 0;
-        int cols = sheet.getWidth() / cell;
-        int rows = sheet.getHeight() / cell;
-        int n = cols * rows;
-        return n > 0 ? n : 0;
+    public BufferedImage wallVariant(int index) {
+        return wallCells[Math.floorMod(index, wallCells.length)];
     }
 
-    private static BufferedImage subcell(BufferedImage sheet, int cell, int index) {
-        if (sheet == null || cell <= 0) return null;
-        int cols = Math.max(1, sheet.getWidth() / cell);
-        int rows = Math.max(1, sheet.getHeight() / cell);
-        int n = cols * rows;
-        if (n <= 0) return sheet;
-        int i = Math.floorMod(index, n);
-        int cx = i % cols;
-        int cy = i / cols;
-        int x = cx * cell;
-        int y = cy * cell;
-        int w = Math.min(cell, sheet.getWidth() - x);
-        int h = Math.min(cell, sheet.getHeight() - y);
-        return sheet.getSubimage(x, y, w, h);
+    public BufferedImage doorFloor() {
+        return doorFloor;
     }
 
-    private static BufferedImage tryReadFS(String path) {
+    private static BufferedImage makeTile(Color base, Color accent) {
+        BufferedImage img = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
         try {
-            File f = new File(path);
-            if (f.exists()) return ImageIO.read(f);
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    private static BufferedImage[] loadFolderVariants(String folderPath, String prefix) {
-        try {
-            File dir = new File(folderPath);
-            if (!dir.exists() || !dir.isDirectory()) return null;
-            File[] files = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".png") && name.startsWith(prefix));
-            if (files == null || files.length == 0) return null;
-            Arrays.sort(files, Comparator.comparing(File::getName));
-            List<BufferedImage> imgs = new ArrayList<>();
-            for (File f : files) {
-                try { imgs.add(ImageIO.read(f)); } catch (Exception ignored) {}
-            }
-            return imgs.isEmpty() ? null : imgs.toArray(new BufferedImage[0]);
-        } catch (Exception ignored) {
-            return null;
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(base);
+            g.fillRect(0, 0, img.getWidth(), img.getHeight());
+            g.setColor(accent);
+            g.drawRect(0, 0, img.getWidth() - 1, img.getHeight() - 1);
+            g.drawLine(0, img.getHeight() / 2, img.getWidth(), img.getHeight() / 2);
+            g.drawLine(img.getWidth() / 2, 0, img.getWidth() / 2, img.getHeight());
+        } finally {
+            g.dispose();
         }
+        return img;
     }
 }
