@@ -6,8 +6,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Lightweight helper that tries both the classpath and common filesystem roots when loading art assets.
@@ -17,10 +21,7 @@ import java.util.Objects;
  */
 public final class ResourceLoader {
 
-    private static final List<Path> SEARCH_ROOTS = List.of(
-            Path.of(""),
-            Path.of("The legend of Esran - Escape Unemployment"),
-            Path.of("The legend of Esran - Escape Unemployment", "src"));
+    private static final List<Path> SEARCH_ROOTS = buildSearchRoots();
 
     private ResourceLoader() {
     }
@@ -50,7 +51,7 @@ public final class ResourceLoader {
 
         for (Path root : SEARCH_ROOTS) {
             Path candidate = root.resolve(normalized);
-            if (Files.exists(candidate)) {
+            if (Files.isRegularFile(candidate)) {
                 return Files.newInputStream(candidate);
             }
         }
@@ -80,5 +81,27 @@ public final class ResourceLoader {
             return path.substring(1);
         }
         return path;
+    }
+
+    private static List<Path> buildSearchRoots() {
+        Set<Path> roots = new LinkedHashSet<>();
+
+        // Always try relative lookups first so unit tests that set an explicit working directory succeed.
+        roots.add(Path.of(""));
+        roots.add(Path.of("src"));
+
+        // Walk up from the current working directory, recording both the directory and its src child.
+        Path cwd = Paths.get("").toAbsolutePath().normalize();
+        for (Path cursor = cwd; cursor != null; cursor = cursor.getParent()) {
+            roots.add(cursor);
+            roots.add(cursor.resolve("src"));
+
+            // If the project root lives under this directory, include it explicitly so running from submodules works.
+            roots.add(cursor.resolve("The legend of Esran - Escape Unemployment"));
+            roots.add(cursor.resolve("The legend of Esran - Escape Unemployment").resolve("src"));
+        }
+
+        // Materialize the ordered set into an immutable list for iteration.
+        return new ArrayList<>(roots);
     }
 }
