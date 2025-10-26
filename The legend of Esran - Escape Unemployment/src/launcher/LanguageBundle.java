@@ -41,6 +41,10 @@ public final class LanguageBundle {
         en.put("boss_repelled", "The guardian drove you back! Regroup at the entrance.");
         en.put("door_locked", "The door is sealed. A key is required.");
         en.put("door_unlock", "Lock released. Keys remaining: %d");
+        en.put("hud_map", "Cavern map");
+        en.put("hud_rooms", "Explored: %d");
+        en.put("hud_exits", "Open paths: %d");
+        en.put("hud_locked", "Locked: %d");
 
         Map<String, String> cy = new HashMap<>(en);
         cy.put("story", "Taith: Adfer cytgord i Ogofeydd Ember");
@@ -65,6 +69,10 @@ public final class LanguageBundle {
         cy.put("boss_repelled", "Gorfododd y gwarcheidwad chi'n ôl! Ail-drefnwch wrth y fynedfa.");
         cy.put("door_locked", "Mae'r drws wedi'i selio. Mae angen allwedd.");
         cy.put("door_unlock", "Clo wedi'i ryddhau. Allweddi'n weddill: %d");
+        cy.put("hud_map", "Map yr ogofeydd");
+        cy.put("hud_rooms", "Wedi archwilio: %d");
+        cy.put("hud_exits", "Llwybrau agored: %d");
+        cy.put("hud_locked", "Wedi'u cloi: %d");
 
         if ("cy".equalsIgnoreCase(locale.getLanguage())) {
             return cy;

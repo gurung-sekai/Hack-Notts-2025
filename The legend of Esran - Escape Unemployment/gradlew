@@ -88,6 +88,15 @@ APP_BASE_NAME=${0##*/}
 # Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
+# When a system Gradle installation is available we can short-circuit the
+# wrapper bootstrap to avoid fetching the distribution over the network. This
+# keeps ./gradlew usable in restricted environments (such as CI sandboxes)
+# where the wrapper download would otherwise fail with a proxy or firewall
+# error. The behaviour can be overridden by setting GRADLEW_FORCE_WRAPPER=true.
+if [ "${GRADLEW_FORCE_WRAPPER:-false}" != "true" ] && command -v gradle >/dev/null 2>&1; then
+    exec gradle "$@"
+fi
+
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD=maximum
 
