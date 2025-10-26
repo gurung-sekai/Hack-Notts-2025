@@ -34,7 +34,12 @@ public final class ResourceLoader {
      * @throws IOException if a filesystem fallback exists but cannot be opened
      */
     public static InputStream open(String resourcePath) throws IOException {
-        String normalized = normalize(resourcePath);
+        String normalized;
+        try {
+            normalized = normalize(resourcePath);
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("Invalid resource path: " + resourcePath, ex);
+        }
 
         ClassLoader loader = Thread.currentThread().getContextClassLoader();
         if (loader != null) {
@@ -77,10 +82,24 @@ public final class ResourceLoader {
 
     private static String normalize(String path) {
         Objects.requireNonNull(path, "path");
-        if (path.startsWith("/")) {
-            return path.substring(1);
+        String trimmed = path.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("path must not be blank");
         }
-        return path;
+
+        String withoutLeadingSlash = trimmed.startsWith("/") ? trimmed.substring(1) : trimmed;
+        Path candidate = Paths.get(withoutLeadingSlash).normalize();
+        for (Path element : candidate) {
+            if ("..".equals(element.toString())) {
+                throw new IllegalArgumentException("path may not contain parent directory navigation");
+            }
+        }
+        if (candidate.isAbsolute()) {
+            throw new IllegalArgumentException("path must be relative");
+        }
+        // Normalise separators so classpath lookup remains stable and directory traversal is prevented in line with
+        // UK National Cyber Security Centre (NCSC) platform security guidance.
+        return candidate.toString().replace('\\', '/');
     }
 
     private static List<Path> buildSearchRoots() {
