@@ -143,6 +143,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private final LanguageBundle texts;
     private final Consumer<DungeonRoomsSnapshot> saveHandler;
     private final Runnable exitHandler;
+    private final BossBattleHost bossBattleHost;
 
     private final Timer timer;
     private final int messageDurationTicks;
@@ -187,13 +188,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                         LanguageBundle texts,
                         Consumer<DungeonRoomsSnapshot> saveHandler,
                         Runnable exitHandler,
-                        DungeonRoomsSnapshot snapshot) {
+                        DungeonRoomsSnapshot snapshot,
+                        BossBattleHost bossBattleHost) {
         GameSecurity.verifyIntegrity();
         this.settings = settings == null ? new GameSettings() : new GameSettings(settings);
         this.controls = controls == null ? new ControlsProfile() : new ControlsProfile(controls);
         this.texts = texts == null ? new LanguageBundle(this.settings.language()) : texts;
         this.saveHandler = saveHandler == null ? snapshotIgnored -> { } : saveHandler;
         this.exitHandler = exitHandler == null ? () -> { } : exitHandler;
+        this.bossBattleHost = bossBattleHost;
         this.timer = new Timer(1000 / Math.max(30, this.settings.refreshRate()), this);
         this.messageDurationTicks = Math.max(1, this.settings.refreshRate() * MESSAGE_SECONDS);
         this.renderSize = this.settings.resolution();
@@ -692,22 +695,31 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (encounter == null) return;
         inBoss = true;
         timer.stop();
+        Consumer<Outcome> finish = outcome -> SwingUtilities.invokeLater(() -> {
+            if (outcome == Outcome.HERO_WIN) {
+                encounter.defeated = true;
+                grantBossReward(encounter);
+            } else {
+                showMessage(texts.text("boss_repelled"));
+                onPlayerDeath();
+            }
+            inBoss = false;
+            iFrames = 60; // grace on return
+            timer.start();
+            requestFocusInWindow();
+        });
+
+        if (bossBattleHost != null) {
+            bossBattleHost.runBossBattle(encounter.kind, finish);
+            return;
+        }
+
         SwingUtilities.invokeLater(() -> {
             JFrame f = new JFrame("Boss Battle");
             f.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
             f.setContentPane(BossBattlePanel.create(encounter.kind, outcome -> {
-                if (outcome == Outcome.HERO_WIN) {
-                    encounter.defeated = true;
-                    grantBossReward(encounter);
-                } else {
-                    showMessage(texts.text("boss_repelled"));
-                    onPlayerDeath();
-                }
+                finish.accept(outcome);
                 f.dispose();
-                inBoss = false;
-                iFrames = 60; // grace on return
-                timer.start();
-                requestFocusInWindow();
             }));
             f.pack();
             f.setLocationRelativeTo(null);
@@ -1339,6 +1351,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     public void shutdown() {
         timer.stop();
+    }
+
+    /**
+     * Callback interface that allows the dungeon panel to embed boss encounters inside the host UI instead of
+     * launching an extra window. Implementations are expected to present {@link BossBattlePanel} content and invoke
+     * the supplied callback when the fight resolves.
+     */
+    public interface BossBattleHost {
+        void runBossBattle(BossBattlePanel.BossKind kind, Consumer<Outcome> outcomeHandler);
     }
 
     private Room rerollObstacles(Room r) {

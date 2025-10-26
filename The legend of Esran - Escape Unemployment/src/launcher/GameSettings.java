@@ -28,7 +28,7 @@ public final class GameSettings implements Serializable {
 
     public GameSettings(Dimension resolution, int refreshRate, Locale language, ControlsProfile controls) {
         this.resolution = (Dimension) Objects.requireNonNull(resolution, "resolution").clone();
-        this.refreshRate = Math.max(30, refreshRate);
+        this.refreshRate = clampRefresh(refreshRate);
         this.language = Objects.requireNonNullElse(language, Locale.UK);
         this.controls = Objects.requireNonNullElseGet(controls, ControlsProfile::new);
     }
@@ -46,7 +46,7 @@ public final class GameSettings implements Serializable {
     }
 
     public void setRefreshRate(int refreshRate) {
-        this.refreshRate = Math.max(30, refreshRate);
+        this.refreshRate = clampRefresh(refreshRate);
     }
 
     public Locale language() {
@@ -67,5 +67,8 @@ public final class GameSettings implements Serializable {
 
     public ControlsProfile mutableControls() {
         return controls;
+    }
+    private static int clampRefresh(int refreshRate) {
+        return Math.max(30, Math.min(240, refreshRate));
     }
 }
