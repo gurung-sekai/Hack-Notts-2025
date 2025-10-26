@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -344,6 +345,14 @@ public final class SpriteSheetSlicer {
                     register(refined, seen, split);
                 }
             }
+            if (countHigh > 0) {
+                centroidHigh = sumHigh / countHigh;
+            }
+        }
+
+        double separation = Math.abs(centroidHigh - centroidLow);
+        if (separation < 1e-3) {
+            return null;
         }
         return refined;
     }
@@ -369,6 +378,9 @@ public final class SpriteSheetSlicer {
 
         double[] columnDensity = new double[cellW];
         double[] rowDensity = new double[cellH];
+        int capacity = cellW * cellH;
+        int[] px = new int[capacity];
+        int[] py = new int[capacity];
 
         int pixelCount = 0;
         for (int y = minY; y <= maxY; y++) {
@@ -380,6 +392,10 @@ public final class SpriteSheetSlicer {
                 }
                 columnDensity[x - minX]++;
                 rowDensity[y - minY]++;
+                if (pixelCount < capacity) {
+                    px[pixelCount] = x;
+                    py[pixelCount] = y;
+                }
                 pixelCount++;
             }
         }
@@ -408,11 +424,11 @@ public final class SpriteSheetSlicer {
             }
         }
 
-        if (splits.isEmpty()) {
-            return List.of();
+        if (!splits.isEmpty()) {
+            return mergeBounds(splits, opts.withJoinGap(0));
         }
 
-        return mergeBounds(splits, opts.withJoinGap(0));
+        return clusterWithKMeans(frame, px, py, pixelCount, opts);
     }
 
     private static void normalise(double[] densities, int divisor) {
@@ -557,6 +573,286 @@ public final class SpriteSheetSlicer {
             return null;
         }
         return bounds;
+    }
+
+    private static List<FrameBounds> clusterWithKMeans(FrameBounds frame,
+                                                       int[] pxRaw,
+                                                       int[] pyRaw,
+                                                       int pixelCount,
+                                                       Options opts) {
+        if (pixelCount <= 0) {
+            return List.of();
+        }
+        int[] px = Arrays.copyOf(pxRaw, pixelCount);
+        int[] py = Arrays.copyOf(pyRaw, pixelCount);
+        int minArea = Math.max(1, opts.minFrameArea());
+        if (pixelCount < minArea * 2 && frame.area() < minArea * 2) {
+            return List.of();
+        }
+
+        int approx = Math.max(2, (int) Math.round(Math.sqrt(Math.max(1.0, pixelCount / (double) minArea))));
+        int maxClusters = Math.min(Math.min(6, approx), pixelCount);
+        if (maxClusters < 2) {
+            return List.of();
+        }
+
+        long seed = (((long) frame.minX()) << 32) ^ (frame.minY() & 0xFFFFFFFFL) ^ (long) pixelCount;
+        int iterations = Math.max(12, opts.aiIterations() * 4);
+        ClusterSolution base = kMeans(px, py, pixelCount, 1, seed, iterations);
+        if (base == null) {
+            return List.of();
+        }
+
+        ClusterSolution best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int k = 2; k <= maxClusters; k++) {
+            ClusterSolution candidate = kMeans(px, py, pixelCount, k, seed + 0x9E3779B97F4A7C15L * k, iterations);
+            if (candidate == null) {
+                continue;
+            }
+            if (candidate.score() > bestScore) {
+                bestScore = candidate.score();
+                best = candidate;
+            }
+        }
+
+        if (best == null) {
+            return List.of();
+        }
+
+        double ratio = base.totalSse() <= 1e-6 ? 0.0 : best.totalSse() / base.totalSse();
+        if (ratio > 0.75 || best.score() < 1.2) {
+            return List.of();
+        }
+
+        int clusters = best.k();
+        int[] assignments = best.assignments();
+        int[] counts = best.counts();
+        int[] minX = new int[clusters];
+        int[] minY = new int[clusters];
+        int[] maxX = new int[clusters];
+        int[] maxY = new int[clusters];
+        Arrays.fill(minX, Integer.MAX_VALUE);
+        Arrays.fill(minY, Integer.MAX_VALUE);
+        Arrays.fill(maxX, Integer.MIN_VALUE);
+        Arrays.fill(maxY, Integer.MIN_VALUE);
+
+        for (int i = 0; i < pixelCount; i++) {
+            int cluster = assignments[i];
+            if (cluster < 0 || cluster >= clusters) {
+                continue;
+            }
+            int x = px[i];
+            int y = py[i];
+            if (x < minX[cluster]) minX[cluster] = x;
+            if (y < minY[cluster]) minY[cluster] = y;
+            if (x > maxX[cluster]) maxX[cluster] = x;
+            if (y > maxY[cluster]) maxY[cluster] = y;
+        }
+
+        List<FrameBounds> result = new ArrayList<>();
+        for (int c = 0; c < clusters; c++) {
+            if (counts[c] <= 0) {
+                continue;
+            }
+            FrameBounds candidate = new FrameBounds(minX[c], minY[c], maxX[c], maxY[c], counts[c]);
+            if (candidate.area() < minArea && counts[c] < minArea) {
+                continue;
+            }
+            result.add(candidate);
+        }
+
+        if (result.size() <= 1) {
+            return List.of();
+        }
+
+        return mergeBounds(result, opts.withJoinGap(0));
+    }
+
+    private static ClusterSolution kMeans(int[] px,
+                                          int[] py,
+                                          int count,
+                                          int k,
+                                          long seed,
+                                          int iterations) {
+        if (count <= 0 || k <= 0) {
+            return null;
+        }
+        if (k == 1) {
+            double meanX = 0;
+            double meanY = 0;
+            for (int i = 0; i < count; i++) {
+                meanX += px[i];
+                meanY += py[i];
+            }
+            meanX /= count;
+            meanY /= count;
+            double totalSse = 0;
+            for (int i = 0; i < count; i++) {
+                double dx = px[i] - meanX;
+                double dy = py[i] - meanY;
+                totalSse += dx * dx + dy * dy;
+            }
+            int[] assignments = new int[count];
+            Arrays.fill(assignments, 0);
+            return new ClusterSolution(1, assignments, new double[]{meanX}, new double[]{meanY}, new int[]{count}, totalSse, 0.0);
+        }
+
+        k = Math.min(k, count);
+        PseudoRandom random = new PseudoRandom(seed);
+        double[] centersX = new double[k];
+        double[] centersY = new double[k];
+        boolean[] used = new boolean[count];
+        for (int c = 0; c < k; c++) {
+            int idx = (int) (random.nextDouble() * count);
+            int guard = 0;
+            while (used[idx] && guard < count) {
+                idx = (idx + 1) % count;
+                guard++;
+            }
+            used[idx] = true;
+            centersX[c] = px[idx];
+            centersY[c] = py[idx];
+        }
+
+        int[] assignments = new int[count];
+        Arrays.fill(assignments, -1);
+        double[] sumX = new double[k];
+        double[] sumY = new double[k];
+        int[] clusterCounts = new int[k];
+        double[] clusterSse = new double[k];
+
+        for (int iter = 0; iter < iterations; iter++) {
+            Arrays.fill(sumX, 0);
+            Arrays.fill(sumY, 0);
+            Arrays.fill(clusterCounts, 0);
+            Arrays.fill(clusterSse, 0);
+            boolean changed = false;
+
+            for (int i = 0; i < count; i++) {
+                double bestDist = Double.POSITIVE_INFINITY;
+                int bestCluster = 0;
+                for (int c = 0; c < k; c++) {
+                    double dx = px[i] - centersX[c];
+                    double dy = py[i] - centersY[c];
+                    double dist = dx * dx + dy * dy;
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestCluster = c;
+                    }
+                }
+                if (assignments[i] != bestCluster) {
+                    assignments[i] = bestCluster;
+                    changed = true;
+                }
+                sumX[bestCluster] += px[i];
+                sumY[bestCluster] += py[i];
+                clusterCounts[bestCluster]++;
+                clusterSse[bestCluster] += bestDist;
+            }
+
+            boolean reseeded = false;
+            for (int c = 0; c < k; c++) {
+                if (clusterCounts[c] == 0) {
+                    reseeded = true;
+                    int idx = (int) (random.nextDouble() * count);
+                    centersX[c] = px[idx];
+                    centersY[c] = py[idx];
+                    assignments[idx] = c;
+                    clusterCounts[c] = 1;
+                    sumX[c] = px[idx];
+                    sumY[c] = py[idx];
+                    clusterSse[c] = 0;
+                } else {
+                    double newCx = sumX[c] / clusterCounts[c];
+                    double newCy = sumY[c] / clusterCounts[c];
+                    if (Math.abs(newCx - centersX[c]) > 1e-6 || Math.abs(newCy - centersY[c]) > 1e-6) {
+                        centersX[c] = newCx;
+                        centersY[c] = newCy;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (!changed && !reseeded) {
+                break;
+            }
+        }
+
+        Arrays.fill(clusterCounts, 0);
+        Arrays.fill(clusterSse, 0);
+        double totalSse = 0;
+        for (int i = 0; i < count; i++) {
+            int cluster = assignments[i];
+            if (cluster < 0 || cluster >= k) {
+                return null;
+            }
+            clusterCounts[cluster]++;
+            double dx = px[i] - centersX[cluster];
+            double dy = py[i] - centersY[cluster];
+            double dist = dx * dx + dy * dy;
+            clusterSse[cluster] += dist;
+            totalSse += dist;
+        }
+        for (int c = 0; c < k; c++) {
+            if (clusterCounts[c] == 0) {
+                return null;
+            }
+        }
+
+        double meanX = 0;
+        double meanY = 0;
+        for (int i = 0; i < count; i++) {
+            meanX += px[i];
+            meanY += py[i];
+        }
+        meanX /= count;
+        meanY /= count;
+
+        double traceB = 0;
+        for (int c = 0; c < k; c++) {
+            double dx = centersX[c] - meanX;
+            double dy = centersY[c] - meanY;
+            traceB += clusterCounts[c] * (dx * dx + dy * dy);
+        }
+
+        double score;
+        if (k == 1 || count == k) {
+            score = traceB;
+        } else if (totalSse <= 1e-6) {
+            score = Double.POSITIVE_INFINITY;
+        } else {
+            score = (traceB / (k - 1)) / ((totalSse) / (count - k));
+        }
+
+        return new ClusterSolution(k, assignments.clone(), centersX, centersY, clusterCounts.clone(), totalSse, score);
+    }
+
+    private record ClusterSolution(int k,
+                                   int[] assignments,
+                                   double[] centersX,
+                                   double[] centersY,
+                                   int[] counts,
+                                   double totalSse,
+                                   double score) {}
+
+    private static final class PseudoRandom {
+        private long state;
+
+        PseudoRandom(long seed) {
+            if (seed == 0) {
+                seed = 0x9E3779B97F4A7C15L;
+            }
+            this.state = seed;
+        }
+
+        double nextDouble() {
+            state ^= (state >>> 12);
+            state ^= (state << 25);
+            state ^= (state >>> 27);
+            long result = state * 2685821657736338717L;
+            return ((result >>> 11) & ((1L << 53) - 1)) / (double) (1L << 53);
+        }
     }
 
     private static int estimateBackground(int[] pixels, int width, int height) {

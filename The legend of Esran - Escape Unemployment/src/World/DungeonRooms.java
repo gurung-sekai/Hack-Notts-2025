@@ -155,6 +155,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private static final int MESSAGE_SECONDS = 3;
+    private static final int MAX_PLAYER_HP = 5;
     private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
     private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
     private static final String BOSS_IDLE_PREFIX = "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
@@ -195,7 +196,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private final List<Bullet> bullets = new ArrayList<>();       // enemy bullets
     private final List<Bullet> playerBullets = new ArrayList<>(); // player bullets
     private final List<Explosion> explosions = new ArrayList<>();
-    private int playerHP = 5;
+    private int playerHP = MAX_PLAYER_HP;
     private int iFrames = 0;
     private int keysHeld = 0;
     private String statusMessage = "";
@@ -266,7 +267,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playerBullets.clear();
         explosions.clear();
         up = down = left = right = false;
-        playerHP = 5;
+        playerHP = MAX_PLAYER_HP;
         iFrames = 0;
         keysHeld = 0;
         statusMessage = "";
@@ -751,7 +752,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (encounter == null || encounter.rewardClaimed) return;
         encounter.rewardClaimed = true;
         keysHeld++;
-        showMessage(texts.text("victory_key", keysHeld));
+        playerHP = MAX_PLAYER_HP;
+        showMessage(texts.text("victory_heal", keysHeld, MAX_PLAYER_HP));
     }
 
     private static String formatBossName(BossBattlePanel.BossKind kind) {
@@ -785,7 +787,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private void onPlayerDeath() {
         SwingUtilities.invokeLater(() -> {
             // Respawn at origin room with full HP and brief invulnerability
-            playerHP = 5;
+            playerHP = MAX_PLAYER_HP;
             iFrames = 60;
             up = down = left = right = false;
             inBoss = false;
