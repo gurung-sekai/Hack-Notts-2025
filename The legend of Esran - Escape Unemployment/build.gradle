@@ -68,11 +68,45 @@ sourceSets {
     }
 }
 
+def staleHeaderDirectories = []
+
 tasks.withType(JavaCompile).configureEach { task ->
     options.incremental = false
-    // Disable JNI header generation; the project has no native methods and Windows/OneDrive
-    // can hold on to the generated directory, causing Gradle to fail when deleting it.
-    options.headerOutputDirectory = null
+
+    // Gradle defaults JNI header generation to build/generated/sources/headers/java/<sourceSet>,
+    // which lives inside the OneDrive-synced project directory for Windows users. OneDrive tends
+    // to lock those files, and Gradle fails the build when it cannot delete the directory during
+    // stale output cleanup. Point the headers at the system temp directory instead so the cleanup
+    // happens outside of OneDrive's control.
+    def originalHeaderDir = options.headerOutputDirectory.orNull?.asFile
+    def tempHeaderRoot = new File(System.getProperty('java.io.tmpdir'),
+            "hacknotts-headers/${project.name}/${task.name}")
+    options.headerOutputDirectory = tempHeaderRoot
+
+    doLast {
+        if (tempHeaderRoot.exists()) {
+            tempHeaderRoot.deleteDir()
+        }
+    }
+
+    if (isWindowsHost) {
+        staleHeaderDirectories << originalHeaderDir
+        task.outputs.doNotTrackState("Avoid Gradle stale output cleanup on Windows when JNI headers live outside the project.")
+    }
+}
+
+if (isWindowsHost) {
+    gradle.buildFinished {
+        staleHeaderDirectories.findAll { it != null }.each { File staleDir ->
+            if (staleDir.exists()) {
+                try {
+                    project.delete(staleDir)
+                } catch (Exception ignored) {
+                    logger.info("JNI header directory ${staleDir} is still locked; leaving it in place.")
+                }
+            }
+        }
+    }
 }
 
 if (!isWindowsHost) {
