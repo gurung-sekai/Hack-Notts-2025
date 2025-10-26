@@ -491,8 +491,8 @@ public class BossBattlePanel extends JPanel {
         }
 
         static HeroDefinition defaultHero() {
-            return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(200, 26, 18, 16),
-                    "/resources/sprites/Knight/Idle/knight_m_idle_anim_f", 1.08, 1.12, 1);
+            return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(240, 28, 20, 18),
+                    "/resources/sprites/Knight/Idle/knight_m_idle_anim_f", 1.12, 1.18, 2);
         }
     }
 
@@ -505,17 +505,17 @@ public class BossBattlePanel extends JPanel {
         static BossDefinition of(BossKind kind) {
             return switch (kind) {
                 case OGRE_WARLORD -> new BossDefinition("Ogre Warlord", Affinity.STONE,
-                        new Stats(220, 22, 16, 12), "/resources/sprites/Ogre/ogre_idle_anim_f", 3.5, 1.04, 1.0, 1);
+                        new Stats(230, 21, 15, 11), "/resources/sprites/Ogre/ogre_idle_anim_f", 3.5, 0.96, 1.02, 1);
                 case SKELETON_LORD -> new BossDefinition("Skeleton Lord", Affinity.VERDANT,
-                        new Stats(180, 19, 13, 20), "/resources/sprites/Skeleton/skelet_idle_anim_f", 3.3, 0.95, 0.9, 0);
+                        new Stats(195, 18, 12, 22), "/resources/sprites/Skeleton/skelet_idle_anim_f", 3.3, 0.92, 0.94, 0);
                 case PUMPKIN_KING -> new BossDefinition("Pumpkin King", Affinity.EMBER,
-                        new Stats(205, 20, 18, 14), "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 3.4, 1.0, 1.05, 0);
+                        new Stats(210, 19, 17, 15), "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 3.4, 0.94, 1.02, 0);
                 case IMP_OVERLORD -> new BossDefinition("Imp Overlord", Affinity.STORM,
-                        new Stats(175, 21, 12, 22), "/resources/sprites/Imp/imp_idle_anim_f", 3.6, 1.02, 0.88, 0);
+                        new Stats(185, 20, 11, 24), "/resources/sprites/Imp/imp_idle_anim_f", 3.6, 0.98, 0.9, 0);
                 case WIZARD_ARCHON -> new BossDefinition("Wizard Archon", Affinity.STORM,
-                        new Stats(190, 24, 13, 18), "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 3.6, 1.05, 0.92, 1);
+                        new Stats(200, 22, 12, 19), "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 3.6, 0.99, 0.92, 1);
                 case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
-                        new Stats(260, 18, 22, 8), "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 3.8, 0.9, 1.15, -1);
+                        new Stats(265, 17, 21, 9), "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 3.8, 0.88, 1.12, -1);
             };
         }
     }

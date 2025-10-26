@@ -22,14 +22,14 @@ public class DamageCalc {
         if(def.status== Status.ROOTED)G=(G*0.9);
         if(def.status== Status.IGNITED && t.affinity== Affinity.EMBER)A=(A*1.2);
 
-        double tunedGuard = (G + 10.0) * Math.max(0.6, def.defenseMod);
+        double tunedGuard = (G + 16.0) * Math.max(0.62, def.defenseMod);
         double tunedPower = A;
 
-        boolean crit= Rng.d01()<0.10; // 10% crit
-        double critMod=crit?1.4:1.0;
+        boolean crit= Rng.d01()<0.08; // 8% crit
+        double critMod=crit?1.35:1.0;
         double aff= AffinityChart.mult(t.affinity,def.aura);
-        double mom=1.0+Math.max(-3,Math.min(3,momentum))*0.05;
-        double rand=0.90+ Rng.d01()*0.20; //0.90..1.10
+        double mom=1.0+Math.max(-3,Math.min(3,momentum))*0.04;
+        double rand=0.92+ Rng.d01()*0.16; //0.92..1.08
 
         //smooth division by adding a constant to guard
         double base = t.power*(tunedPower/Math.max(1.0,tunedGuard));

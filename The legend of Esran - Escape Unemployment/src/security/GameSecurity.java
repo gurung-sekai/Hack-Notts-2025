@@ -26,7 +26,7 @@ public final class GameSecurity {
         hashes.put(Path.of("The legend of Esran - Escape Unemployment", "src", "World", "ZeldaRooms.java"),
                 "186e8aa272c30f2977fa5fafe9603e4cf59a84581dffb9230f4be6c196d2d8a6");
         hashes.put(Path.of("The legend of Esran - Escape Unemployment", "src", "Battle", "scene", "BossBattlePanel.java"),
-                "899cea6df8f5d77c7994225533628fbec9a0873af254b273e4957fa2d9011435");
+                "494e3898875792aed2f2535e587d39063d92fca3c6dff2514309ff8a31da8944");
         EXPECTED_HASHES = Collections.unmodifiableMap(hashes);
     }
 

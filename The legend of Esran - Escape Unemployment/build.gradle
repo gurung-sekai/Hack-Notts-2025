@@ -7,6 +7,7 @@ repositories {
 }
 
 def javaFxLibDir = file("${rootProject.projectDir}/../javafx-sdk-21.0.2/lib")
+def isWindowsHost = System.properties['os.name']?.toLowerCase()?.contains('win') ?: false
 
 dependencies {
     implementation fileTree(dir: javaFxLibDir, include: ['*.jar'])
@@ -63,5 +64,8 @@ tasks.withType(JavaCompile).configureEach {
                 logger.warn("Proceeding with existing compiled classes under ${dir} after repeated cleanup attempts.")
             }
         }
+    }
+    if (isWindowsHost) {
+        outputs.doNotTrackState("Windows retains file locks on compiled classes; skip stale output cleanup to avoid build flakiness.")
     }
 }
