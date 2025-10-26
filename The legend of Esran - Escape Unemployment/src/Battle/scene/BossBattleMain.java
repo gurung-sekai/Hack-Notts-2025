@@ -10,8 +10,8 @@ public class BossBattleMain {
 
             BossBattlePanel panel = BossBattlePanel.create(
                     BossBattlePanel.BossKind.OGRE_WARLORD,
-                    () -> {
-                        System.out.println("Battle ended (win or game over) — return to world here.");
+                    outcome -> {
+                        System.out.println("Battle ended with outcome: " + outcome + " — return to world here.");
                         f.dispose();
                     });
 
