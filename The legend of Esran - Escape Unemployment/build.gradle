@@ -70,6 +70,9 @@ sourceSets {
 
 tasks.withType(JavaCompile).configureEach {
     options.incremental = false
+    // Disable JNI header generation; the project has no native methods and Windows/OneDrive
+    // can hold on to the generated directory, causing Gradle to fail when deleting it.
+    options.headerOutputDirectory = null
 }
 
 if (!isWindowsHost) {
