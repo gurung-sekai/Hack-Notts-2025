@@ -1,20 +1,13 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="GameLauncher" type="GradleRunConfiguration" factoryName="Gradle">
-    <ExternalSystemSettings>
-      <option name="executionName" />
-      <option name="externalProjectPath" value="$PROJECT_DIR$/The legend of Esran - Escape Unemployment" />
-      <option name="externalSystemIdString" value="GRADLE" />
-      <option name="scriptParameters" />
-      <option name="taskDescriptions">
-        <list />
-      </option>
-      <option name="taskNames">
-        <list>
-          <option value=":runGameLauncher" />
-        </list>
-      </option>
-      <option name="vmOptions" />
-    </ExternalSystemSettings>
-    <method v="2" />
+  <configuration default="false" name="GameLauncher" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="launcher.GameLauncher" />
+    <option name="VM_PARAMETERS" value="" />
+    <option name="PROGRAM_PARAMETERS" value="" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/The legend of Esran - Escape Unemployment" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+    <module name="The legend of Esran - Escape Unemployment" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
   </configuration>
 </component>
