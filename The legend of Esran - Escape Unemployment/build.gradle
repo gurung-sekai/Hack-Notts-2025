@@ -1,4 +1,7 @@
 import org.gradle.api.Project
+import org.gradle.api.tasks.compile.JavaCompile
+import java.io.IOException
+import java.util.Locale
 
 plugins {
     id 'application'
@@ -27,7 +30,50 @@ if (javaFxLibDir == null) {
             "javafx-sdk-21.0.2/lib, javafx-sdk-25.0.1/lib, javafx-sdk/lib, or lib/javafx relative to the project root.")
 }
 
-def isWindowsHost = System.properties['os.name']?.toLowerCase()?.contains('win') ?: false
+def isWindowsHost = System.properties['os.name']?.toLowerCase(Locale.ROOT)?.contains('win') ?: false
+
+File defaultBuildDir = project.buildDir
+
+def resolveBuildRoot(boolean isWindowsHostValue, File defaultDir) {
+    def override = System.getenv('GRADLE_BUILD_DIR') ?: (hasProperty('legend.buildDir') ? property('legend.buildDir') : null)
+    if (override) {
+        return file(override)
+    }
+
+    if (!isWindowsHostValue) {
+        return defaultDir
+    }
+
+    def canonical = { File candidate ->
+        try {
+            return candidate.canonicalFile
+        } catch (IOException ignored) {
+            return candidate.absoluteFile
+        }
+    }
+
+    File rootCanonical = canonical(project.rootDir)
+    List<File> oneDriveRoots = ['ONEDRIVE', 'OneDriveCommercial', 'OneDriveConsumer', 'OneDrive', 'OneDriveEducation']
+            .collect { System.getenv(it) }
+            .findAll { it }
+            .collect { canonical(new File(it)) }
+
+    boolean underOneDrive = oneDriveRoots.any { rootCanonical.path.equalsIgnoreCase(it.path) || rootCanonical.path.startsWith(it.path + File.separator) }
+    if (!underOneDrive) {
+        return defaultDir
+    }
+
+    String base = System.getenv('LOCALAPPDATA') ?: System.getenv('TEMP') ?: System.getProperty('java.io.tmpdir')
+    File safeRoot = new File(base, "HackNotts/${project.name}")
+    return safeRoot
+}
+
+File resolvedBuildDir = resolveBuildRoot(isWindowsHost, defaultBuildDir)
+if (resolvedBuildDir != defaultBuildDir) {
+    logger.lifecycle("Using build directory ${resolvedBuildDir} to avoid cloud sync locks. Set legend.buildDir or GRADLE_BUILD_DIR to override.")
+}
+
+layout.buildDirectory.set(resolvedBuildDir)
 
 def javaFxJars = javaFxLibDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
 if (javaFxJars.isEmpty()) {
@@ -44,6 +90,16 @@ application {
             '--module-path', javaFxLibDir.absolutePath,
             '--add-modules', 'javafx.controls'
     ]
+}
+
+tasks.register('runGameLauncher', JavaExec) {
+    group = 'application'
+    description = 'Launches the Swing-based game launcher without any manual IDE setup.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'launcher.GameLauncher'
+    workingDir = project.projectDir
+    jvmArgs '--module-path', javaFxLibDir.absolutePath,
+            '--add-modules', 'javafx.controls'
 }
 
 java {
@@ -68,63 +124,31 @@ sourceSets {
     }
 }
 
-def staleHeaderDirectories = []
-
 tasks.withType(JavaCompile).configureEach { task ->
-    options.incremental = false
+    if (!isWindowsHost) {
+        return
+    }
 
-    // Gradle defaults JNI header generation to build/generated/sources/headers/java/<sourceSet>,
-    // which lives inside the OneDrive-synced project directory for Windows users. OneDrive tends
-    // to lock those files, and Gradle fails the build when it cannot delete the directory during
-    // stale output cleanup. Point the headers at the system temp directory instead so the cleanup
-    // happens outside of OneDrive's control.
-    def originalHeaderDir = options.headerOutputDirectory.orNull?.asFile
-    def tempHeaderRoot = new File(System.getProperty('java.io.tmpdir'),
-            "hacknotts-headers/${project.name}/${task.name}")
-    options.headerOutputDirectory = tempHeaderRoot
+    def headerDirProvider = project.layout.dir(project.provider {
+        new File(System.getProperty('java.io.tmpdir'), "hacknotts-headers/${project.name}/${task.name}")
+    })
+
+    doFirst {
+        def headerDir = headerDirProvider.get().asFile
+        if (headerDir.exists()) {
+            project.delete(headerDir)
+        }
+    }
+
+    options.headerOutputDirectory.set(headerDirProvider)
+    task.outputs.dir(headerDirProvider)
 
     doLast {
-        if (tempHeaderRoot.exists()) {
-            tempHeaderRoot.deleteDir()
-        }
-    }
-
-    if (isWindowsHost) {
-        if (originalHeaderDir != null) {
-            staleHeaderDirectories << originalHeaderDir
-        }
-        task.doNotTrackState("Avoid Gradle stale output cleanup on Windows when JNI headers live outside the project.")
-    }
-}
-
-if (isWindowsHost) {
-    gradle.buildFinished {
-        staleHeaderDirectories.findAll { it != null }.each { File staleDir ->
-            if (staleDir.exists()) {
-                try {
-                    project.delete(staleDir)
-                } catch (Exception ignored) {
-                    logger.info("JNI header directory ${staleDir} is still locked; leaving it in place.")
-                }
+        def headerDir = headerDirProvider.get().asFile
+        if (headerDir.exists()) {
+            if (!project.delete(headerDir)) {
+                logger.info("JNI header directory ${headerDir} could not be removed; it will be cleaned on the next run.")
             }
         }
-    }
-}
-
-if (!isWindowsHost) {
-    def purgeJavaClasses = tasks.register('purgeJavaClasses') {
-        group = 'build setup'
-        description = 'Removes compiled Java outputs before a fresh compilation on non-Windows hosts.'
-        doLast {
-            def classesDir = file("${buildDir}/classes")
-            if (classesDir.exists()) {
-                logger.lifecycle("Deleting ${classesDir} before recompiling Java sources.")
-                project.delete(classesDir)
-            }
-        }
-    }
-
-    tasks.withType(JavaCompile).configureEach { task ->
-        task.dependsOn(purgeJavaClasses)
     }
 }
