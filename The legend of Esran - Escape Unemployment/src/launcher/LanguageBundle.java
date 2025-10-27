@@ -20,7 +20,7 @@ public final class LanguageBundle {
     private Map<String, String> buildEntries(Locale locale) {
         Map<String, String> en = new HashMap<>();
         en.put("story", "Quest: Restore harmony to the Ember Caverns");
-        en.put("intro", "The guild pleads: chart the caverns and bring back the lost light!");
+        en.put("intro", "Queen Aurelia is captive beneath the capital. Hunt the Golden Knight's lieutenants and reclaim her freedom!");
         en.put("key_drop", "An enemy dropped a key!");
         en.put("need_key", "A sturdy door blocks the way. It needs a key.");
         en.put("unlock", "You unlock the reinforced door.");
@@ -37,6 +37,7 @@ public final class LanguageBundle {
         en.put("key_obtained", "You pocket a cavern key! Keys: %d");
         en.put("boss_challenge", "Guardian challenge: %s");
         en.put("victory_key", "Guardian bested! Keys: %d");
+        en.put("victory_heal", "Guardian bested! Keys: %d — your wounds mend (HP restored to %d).");
         en.put("respawn", "You gather your breath at the entrance. The caverns still await!");
         en.put("boss_repelled", "The guardian drove you back! Regroup at the entrance.");
         en.put("door_locked", "The door is sealed. A key is required.");
@@ -48,7 +49,7 @@ public final class LanguageBundle {
 
         Map<String, String> cy = new HashMap<>(en);
         cy.put("story", "Taith: Adfer cytgord i Ogofeydd Ember");
-        cy.put("intro", "Mae'r urdd yn erfyn: mapiwch yr ogofeydd a dychwelwch y goleuni coll!");
+        cy.put("intro", "Mae'r Frenhines Aurelia yn gaeth o dan y brifddinas. Rhaid i chi ddymchwel dirprwyon y Marchog Euraidd a'i rhyddhau!");
         cy.put("key_drop", "Gollwng allwedd gan elyn!");
         cy.put("need_key", "Mae drws cadarn yn blocio'r ffordd. Mae angen allwedd.");
         cy.put("unlock", "Rydych yn datgloi'r drws wedi'i atgyfnerthu.");
@@ -65,6 +66,7 @@ public final class LanguageBundle {
         cy.put("key_obtained", "Rydych yn codi allwedd ogof! Allweddi: %d");
         cy.put("boss_challenge", "Her gwarcheidwad: %s");
         cy.put("victory_key", "Gorchfygiad gwarcheidwad! Allweddi: %d");
+        cy.put("victory_heal", "Gorchfygwyd y gwarcheidwad! Allweddi: %d — rydych yn gwella (HP wedi'i adfer i %d).");
         cy.put("respawn", "Rydych yn ymgynnull wrth y fynedfa. Mae'r ogofeydd yn disgwyl!");
         cy.put("boss_repelled", "Gorfododd y gwarcheidwad chi'n ôl! Ail-drefnwch wrth y fynedfa.");
         cy.put("door_locked", "Mae'r drws wedi'i selio. Mae angen allwedd.");

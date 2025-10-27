@@ -1,7 +1,14 @@
 import org.gradle.api.Project
+import org.gradle.api.tasks.compile.JavaCompile
+import java.io.IOException
+import java.util.Locale
 
 plugins {
     id 'application'
+}
+
+repositories {
+    mavenCentral()
 }
 
 static File locateJavaFxLib(Project project) {
@@ -27,7 +34,50 @@ if (javaFxLibDir == null) {
             "javafx-sdk-21.0.2/lib, javafx-sdk-25.0.1/lib, javafx-sdk/lib, or lib/javafx relative to the project root.")
 }
 
-def isWindowsHost = System.properties['os.name']?.toLowerCase()?.contains('win') ?: false
+def isWindowsHost = System.properties['os.name']?.toLowerCase(Locale.ROOT)?.contains('win') ?: false
+
+File defaultBuildDir = project.buildDir
+
+def resolveBuildRoot(boolean isWindowsHostValue, File defaultDir) {
+    def override = System.getenv('GRADLE_BUILD_DIR') ?: (hasProperty('legend.buildDir') ? property('legend.buildDir') : null)
+    if (override) {
+        return file(override)
+    }
+
+    if (!isWindowsHostValue) {
+        return defaultDir
+    }
+
+    def canonical = { File candidate ->
+        try {
+            return candidate.canonicalFile
+        } catch (IOException ignored) {
+            return candidate.absoluteFile
+        }
+    }
+
+    File rootCanonical = canonical(project.rootDir)
+    List<File> oneDriveRoots = ['ONEDRIVE', 'OneDriveCommercial', 'OneDriveConsumer', 'OneDrive', 'OneDriveEducation']
+            .collect { System.getenv(it) }
+            .findAll { it }
+            .collect { canonical(new File(it)) }
+
+    boolean underOneDrive = oneDriveRoots.any { rootCanonical.path.equalsIgnoreCase(it.path) || rootCanonical.path.startsWith(it.path + File.separator) }
+    if (!underOneDrive) {
+        return defaultDir
+    }
+
+    String base = System.getenv('LOCALAPPDATA') ?: System.getenv('TEMP') ?: System.getProperty('java.io.tmpdir')
+    File safeRoot = new File(base, "HackNotts/${project.name}")
+    return safeRoot
+}
+
+File resolvedBuildDir = resolveBuildRoot(isWindowsHost, defaultBuildDir)
+if (resolvedBuildDir != defaultBuildDir) {
+    logger.lifecycle("Using build directory ${resolvedBuildDir} to avoid cloud sync locks. Set legend.buildDir or GRADLE_BUILD_DIR to override.")
+}
+
+layout.buildDirectory.set(resolvedBuildDir)
 
 def javaFxJars = javaFxLibDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
 if (javaFxJars.isEmpty()) {
@@ -46,6 +96,16 @@ application {
     ]
 }
 
+tasks.register('runGameLauncher', JavaExec) {
+    group = 'application'
+    description = 'Launches the Swing-based game launcher without any manual IDE setup.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'launcher.GameLauncher'
+    workingDir = project.projectDir
+    jvmArgs '--module-path', javaFxLibDir.absolutePath,
+            '--add-modules', 'javafx.controls'
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -58,6 +118,28 @@ sourceSets {
             srcDirs = ['src']
         }
     }
+    test {
+        java {
+            srcDirs = ['test']
+        }
+        resources {
+            srcDirs = ['test-resources']
+        }
+    }
+}
+
+tasks.named('test').configure {
+    doLast {
+        ['unit.gfx.AnimatedSpriteFrameEnumerationTest',
+         'integration.battle.scene.BossBattlePanelPrewarmIntegrationTest',
+         'acceptance.battle.scene.BossBattleFlowAcceptanceTest',
+         'security.integrity.IntegrityVerifierTest'].each { testClass ->
+            javaexec {
+                classpath = project.sourceSets.test.runtimeClasspath
+                mainClass = testClass
+            }
+        }
+    }
 }
 
 // Ensure all Java executions (run, test) see the JavaFX modules.
@@ -68,24 +150,31 @@ sourceSets {
     }
 }
 
-tasks.withType(JavaCompile).configureEach {
-    options.incremental = false
-}
+tasks.withType(JavaCompile).configureEach { task ->
+    if (!isWindowsHost) {
+        return
+    }
 
-if (!isWindowsHost) {
-    def purgeJavaClasses = tasks.register('purgeJavaClasses') {
-        group = 'build setup'
-        description = 'Removes compiled Java outputs before a fresh compilation on non-Windows hosts.'
-        doLast {
-            def classesDir = file("${buildDir}/classes")
-            if (classesDir.exists()) {
-                logger.lifecycle("Deleting ${classesDir} before recompiling Java sources.")
-                project.delete(classesDir)
-            }
+    def headerDirProvider = project.layout.dir(project.provider {
+        new File(System.getProperty('java.io.tmpdir'), "hacknotts-headers/${project.name}/${task.name}")
+    })
+
+    doFirst {
+        def headerDir = headerDirProvider.get().asFile
+        if (headerDir.exists()) {
+            project.delete(headerDir)
         }
     }
 
-    tasks.withType(JavaCompile).configureEach { task ->
-        task.dependsOn(purgeJavaClasses)
+    options.headerOutputDirectory.set(headerDirProvider)
+    task.outputs.dir(headerDirProvider)
+
+    doLast {
+        def headerDir = headerDirProvider.get().asFile
+        if (headerDir.exists()) {
+            if (!project.delete(headerDir)) {
+                logger.info("JNI header directory ${headerDir} could not be removed; it will be cleaned on the next run.")
+            }
+        }
     }
 }

@@ -4,9 +4,12 @@ import Battle.core.DamageCalc;
 import Battle.core.SimpleAi;
 import Battle.domain.*;
 import Battle.util.Rng;
+import fx.BossFXLibrary;
 import fx.Effect;
 import fx.FXLibrary;
+import fx.FrameAnim;
 import gfx.AnimatedSprite;
+import gfx.HiDpiScaler;
 
 import javax.swing.*;
 import java.awt.*;
@@ -16,6 +19,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -29,6 +33,9 @@ public class BossBattlePanel extends JPanel {
     private static final double BASE_WIDTH = 960.0;
     private static final double BASE_HEIGHT = 540.0;
     private static final double SPRITE_SCALE_BOOST = 1.5;
+    private static final double RESOLVE_MIN_LOCK = 0.75;
+    private static final double MIN_ATTACK_DISPLAY = 0.35;
+    private static final double ATTACK_ANIM_FPS = 12.0;
     private static final double MESSAGE_LIFETIME = 3.5;
 
     public enum BossKind {
@@ -48,6 +55,25 @@ public class BossBattlePanel extends JPanel {
         TOXIC_TREE
     }
     public enum Outcome { HERO_WIN, HERO_LOSS }
+
+    public static boolean hasDedicatedAssets(BossKind kind) {
+        return switch (kind) {
+            case BIG_ZOMBIE -> hasBossDirectory("dreadHusk");
+            case OGRE_WARLORD -> hasBossDirectory("ogreWarlord");
+            case SKELETON_LORD -> hasBossDirectory("skeletonLord");
+            case PUMPKIN_KING -> hasBossDirectory("pumpkinKing");
+            case IMP_OVERLORD -> hasBossDirectory("impOverlord");
+            case WIZARD_ARCHON -> hasBossDirectory("wizardArchon");
+            case GOLLUM -> hasBossDirectory("Gollum");
+            case GRIM -> hasBossDirectory("Grim");
+            case FIRE_FLINGER -> hasBossDirectory("fireFlinger");
+            case GOLD_MECH -> hasBossDirectory("goldMech");
+            case GOLDEN_KNIGHT -> hasBossDirectory("goldenKnight");
+            case PURPLE_EMPRESS -> hasBossDirectory("purpleEmpress");
+            case THE_WELCH -> hasBossDirectory("theWelch");
+            case TOXIC_TREE -> hasBossDirectory("toxicTree");
+        };
+    }
 
     public static BossBattlePanel create(BossKind kind, Consumer<Outcome> onEnd) {
         HeroDefinition hero = HeroDefinition.defaultHero();
@@ -70,6 +96,10 @@ public class BossBattlePanel extends JPanel {
     private final List<BattleMessage> battleMessages = new ArrayList<>();
 
     private final BufferedImage floorTile;
+    private BufferedImage floorCache;
+    private int floorCacheWidth = -1;
+    private int floorCacheHeight = -1;
+    private final Timer animationTimer;
 
     private long lastTickNs = 0;
     private double resolveLock = 0.0;
@@ -82,13 +112,17 @@ public class BossBattlePanel extends JPanel {
         setBackground(Color.BLACK);
         setFocusable(true);
 
-        int initialMomentum = Math.max(-2, Math.min(2, heroDef.openingMomentum - bossDef.momentumEdge));
+        int initialMomentum = Math.max(-2, Math.min(2, heroDef.openingMomentum() - bossDef.momentumEdge()));
         this.engine = new BattleEngine(heroDef.toFighter(), bossDef.toFighter(), initialMomentum, onEnd);
-        this.heroVisual = new FighterVisual(engine.hero, heroDef.sprite, 280, 470, 3.2);
-        this.bossVisual = new FighterVisual(engine.boss, bossDef.sprite, 700, 320, bossDef.scale);
+        this.heroVisual = new FighterVisual(engine.hero, heroDef.sprite(), 280, 470, 3.2, Double.NaN, List.of());
+        this.bossVisual = new FighterVisual(engine.boss, bossDef.sprite(), 700, 320, bossDef.scale(),
+                bossDef.maxHeight(), bossDef.attackIds());
         this.floorTile = loadImage("/resources/tiles/floor/floor_5.png");
 
-        addMessage("A wild " + bossDef.displayName + " appears!");
+        addMessage("A wild " + bossDef.displayName() + " appears!");
+        heroVisual.ensureWarmed(1.0);
+        bossVisual.ensureWarmed(1.0);
+        SwingUtilities.invokeLater(this::warmForCurrentLayout);
 
         addKeyListener(new KeyAdapter() {
             @Override public void keyPressed(KeyEvent e) {
@@ -107,7 +141,28 @@ public class BossBattlePanel extends JPanel {
             }
         });
 
-        new javax.swing.Timer(1000 / 60, e -> tick()).start();
+        animationTimer = new Timer(1000 / 60, e -> tick());
+        animationTimer.setInitialDelay(0);
+        animationTimer.setCoalesce(true);
+        animationTimer.start();
+    }
+
+    /** Stop the animation timer so the panel can be disposed without background work. */
+    public void shutdown() {
+        animationTimer.stop();
+    }
+
+    @Override public void addNotify() {
+        super.addNotify();
+        if (!animationTimer.isRunning()) {
+            animationTimer.start();
+        }
+        SwingUtilities.invokeLater(this::warmForCurrentLayout);
+    }
+
+    @Override public void removeNotify() {
+        animationTimer.stop();
+        super.removeNotify();
     }
 
     private void chooseCommand() {
@@ -127,9 +182,17 @@ public class BossBattlePanel extends JPanel {
         addMessages(outcome.messages);
 
         LayoutMetrics metrics = layoutMetrics();
+        double longestAttack = 0.0;
 
         for (Event event : outcome.events) {
             switch (event.type) {
+                case ATTACK -> {
+                    FighterVisual actor = visualFor(event.actor);
+                    if (actor != null) {
+                        double duration = actor.playAttack(event.technique);
+                        longestAttack = Math.max(longestAttack, duration);
+                    }
+                }
                 case DAMAGE -> {
                     FighterVisual target = visualFor(event.target);
                     if (target != null) {
@@ -194,7 +257,7 @@ public class BossBattlePanel extends JPanel {
             queueOutcome(Outcome.HERO_LOSS);
         } else {
             phase = Phase.RESOLVING;
-            resolveLock = 0.75;
+            resolveLock = Math.max(RESOLVE_MIN_LOCK, longestAttack);
         }
     }
 
@@ -284,9 +347,13 @@ public class BossBattlePanel extends JPanel {
     @Override protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         LayoutMetrics metrics = layoutMetrics();
+        heroVisual.ensureWarmed(metrics.scale());
+        bossVisual.ensureWarmed(metrics.scale());
 
         drawFloor(g2);
         drawEffectsBehind(g2);
@@ -307,17 +374,57 @@ public class BossBattlePanel extends JPanel {
         return new LayoutMetrics(scale, offsetX, offsetY);
     }
 
+    private void warmForCurrentLayout() {
+        LayoutMetrics metrics = layoutMetrics();
+        heroVisual.ensureWarmed(metrics.scale());
+        bossVisual.ensureWarmed(metrics.scale());
+    }
+
     private record LayoutMetrics(double scale, double offsetX, double offsetY) { }
 
+    private record FrameSize(int width, int height) { }
+
     private void drawFloor(Graphics2D g2) {
-        if (floorTile == null) return;
-        int tileW = floorTile.getWidth();
-        int tileH = floorTile.getHeight();
-        for (int x = 0; x < getWidth(); x += tileW) {
-            for (int y = 0; y < getHeight(); y += tileH) {
-                g2.drawImage(floorTile, x, y, null);
-            }
+        if (floorTile == null) {
+            return;
         }
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        ensureFloorCache(width, height);
+        if (floorCache != null) {
+            g2.drawImage(floorCache, 0, 0, null);
+        }
+    }
+
+    private void ensureFloorCache(int width, int height) {
+        if (floorTile == null || width <= 0 || height <= 0) {
+            floorCache = null;
+            floorCacheWidth = -1;
+            floorCacheHeight = -1;
+            return;
+        }
+        if (floorCache != null && floorCacheWidth == width && floorCacheHeight == height) {
+            return;
+        }
+        int tileSize = Math.max(64, Math.min(128, Math.max(width, height) / 8));
+        BufferedImage tile = HiDpiScaler.scale(floorTile, tileSize, tileSize);
+        BufferedImage cache = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = cache.createGraphics();
+        try {
+            for (int x = 0; x < width; x += tile.getWidth()) {
+                for (int y = 0; y < height; y += tile.getHeight()) {
+                    g.drawImage(tile, x, y, null);
+                }
+            }
+        } finally {
+            g.dispose();
+        }
+        floorCache = cache;
+        floorCacheWidth = width;
+        floorCacheHeight = height;
     }
 
     private void drawEffectsBehind(Graphics2D g2) {
@@ -340,17 +447,23 @@ public class BossBattlePanel extends JPanel {
     }
 
     private void drawFighter(Graphics2D g2, FighterVisual vis, boolean flip, LayoutMetrics metrics) {
-        BufferedImage frame = vis.sprite.frame();
+        BufferedImage frame = vis.frame();
         Rectangle bounds = layoutFighter(vis, frame, metrics);
         if (frame == null || bounds.width <= 0 || bounds.height <= 0) {
             return;
         }
+        BufferedImage renderFrame = HiDpiScaler.scale(frame, bounds.width, bounds.height);
+        if (renderFrame == null) {
+            renderFrame = frame;
+        }
+        int srcW = renderFrame.getWidth();
+        int srcH = renderFrame.getHeight();
         if (flip) {
-            g2.drawImage(frame, bounds.x + bounds.width, bounds.y, bounds.x, bounds.y + bounds.height,
-                    0, 0, frame.getWidth(), frame.getHeight(), null);
+            g2.drawImage(renderFrame, bounds.x + bounds.width, bounds.y, bounds.x, bounds.y + bounds.height,
+                    0, 0, srcW, srcH, null);
         } else {
-            g2.drawImage(frame, bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height,
-                    0, 0, frame.getWidth(), frame.getHeight(), null);
+            g2.drawImage(renderFrame, bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height,
+                    0, 0, srcW, srcH, null);
         }
     }
 
@@ -360,19 +473,44 @@ public class BossBattlePanel extends JPanel {
         double offsetY = metrics.offsetY();
         int cx = (int) Math.round(offsetX + vis.footX * scale);
         int cy = (int) Math.round(offsetY + vis.footY * scale);
-        if (frame == null) {
+        FrameSize size = scaledFrameSize(vis, frame, scale);
+        if (frame == null || size.width() <= 0 || size.height() <= 0) {
             vis.bounds.setBounds(cx, cy, 0, 0);
             return vis.bounds;
         }
-        double spriteScale = vis.baseScale * scale * SPRITE_SCALE_BOOST;
-        int w = Math.max(1, (int) Math.round(frame.getWidth() * spriteScale));
-        int h = Math.max(1, (int) Math.round(frame.getHeight() * spriteScale));
+        int w = size.width();
+        int h = size.height();
         vis.bounds.setBounds(cx - w / 2, cy - h, w, h);
         return vis.bounds;
     }
 
+    private static FrameSize scaledFrameSize(FighterVisual vis, BufferedImage frame, double layoutScale) {
+        if (frame == null || layoutScale <= 0 || Double.isNaN(layoutScale)) {
+            return new FrameSize(0, 0);
+        }
+        double spriteScale = vis.baseScale * layoutScale * SPRITE_SCALE_BOOST;
+        double rawW = frame.getWidth() * spriteScale;
+        double rawH = frame.getHeight() * spriteScale;
+        double maxHeightPx = vis.maxHeightPx(layoutScale);
+        double maxWidthPx = vis.maxWidthPx(layoutScale);
+        double clamp = 1.0;
+        if (Double.isFinite(maxHeightPx) && rawH > maxHeightPx) {
+            clamp = Math.min(clamp, maxHeightPx / Math.max(1.0, rawH));
+        }
+        if (Double.isFinite(maxWidthPx) && rawW > maxWidthPx) {
+            clamp = Math.min(clamp, maxWidthPx / Math.max(1.0, rawW));
+        }
+        if (clamp < 1.0) {
+            rawW *= clamp;
+            rawH *= clamp;
+        }
+        int w = Math.max(1, (int) Math.round(rawW));
+        int h = Math.max(1, (int) Math.round(rawH));
+        return new FrameSize(w, h);
+    }
+
     private Point centerOf(FighterVisual vis, LayoutMetrics metrics) {
-        Rectangle bounds = layoutFighter(vis, vis.sprite.frame(), metrics);
+        Rectangle bounds = layoutFighter(vis, vis.frame(), metrics);
         return new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     }
 
@@ -559,18 +697,35 @@ public class BossBattlePanel extends JPanel {
     // Fighter visual wrapper
     // ---------------------------------------------------------------------
     private static class FighterVisual {
+        private static final double DEFAULT_VERTICAL_MARGIN = 40.0;
+        private static final double DEFAULT_MAX_WIDTH = BASE_WIDTH * 0.48;
+
         final Fighter fighter;
         final AnimatedSprite sprite = new AnimatedSprite(0, 0);
         final double footX;
         final double footY;
         final double baseScale;
         final Rectangle bounds = new Rectangle();
+        final List<String> attackIds;
+        final double maxHeightBase;
+        final double maxWidthBase;
 
-        FighterVisual(Fighter fighter, SpriteSource spriteSource, double footX, double footY, double baseScale) {
+        private int attackCursor = 0;
+        private FrameAnim activeAttack = null;
+        private double attackTimer = 0.0;
+        private double warmedScale = Double.NaN;
+        private double warmedAttacksScale = Double.NaN;
+
+        FighterVisual(Fighter fighter, SpriteSource spriteSource, double footX, double footY,
+                      double baseScale, double maxHeight, List<String> attackIds) {
             this.fighter = fighter;
             this.footX = footX;
             this.footY = footY;
             this.baseScale = baseScale;
+            double derivedMaxHeight = Double.isFinite(maxHeight) ? maxHeight : Math.max(footY - DEFAULT_VERTICAL_MARGIN, 200.0);
+            this.maxHeightBase = Math.max(derivedMaxHeight, 180.0);
+            this.maxWidthBase = DEFAULT_MAX_WIDTH;
+            this.attackIds = attackIds == null || attackIds.isEmpty() ? List.of() : List.copyOf(attackIds);
             Objects.requireNonNull(spriteSource, "spriteSource").loadInto(sprite);
             sprite.setState(AnimatedSprite.State.IDLE);
             sprite.setFps(6.0);
@@ -578,6 +733,134 @@ public class BossBattlePanel extends JPanel {
 
         void update(double dt) {
             sprite.update(dt);
+            if (activeAttack != null) {
+                activeAttack.update(dt);
+                attackTimer -= dt;
+                if (attackTimer <= 0) {
+                    activeAttack = null;
+                    attackTimer = 0;
+                }
+            }
+        }
+
+        BufferedImage frame() {
+            return (activeAttack != null) ? activeAttack.frame() : sprite.frame();
+        }
+
+        double playAttack(Technique technique) {
+            if (attackIds.isEmpty()) {
+                return 0.0;
+            }
+            String attackId = chooseAttackId(technique);
+            if (attackId == null || attackId.isEmpty()) {
+                return 0.0;
+            }
+            FrameAnim anim;
+            try {
+                anim = BossFXLibrary.attack(attackId, ATTACK_ANIM_FPS);
+            } catch (RuntimeException ex) {
+                return 0.0;
+            }
+            this.activeAttack = anim;
+            this.attackTimer = Math.max(anim.duration(), MIN_ATTACK_DISPLAY);
+            if (Double.isFinite(warmedScale)) {
+                anim.forEachFrame(frame -> warmFrame(frame, warmedScale));
+            }
+            return attackTimer;
+        }
+
+        private String chooseAttackId(Technique technique) {
+            if (attackIds.isEmpty()) {
+                return null;
+            }
+            String desired = technique != null ? normalizeAttackToken(technique.name) : "";
+            if (!desired.isEmpty()) {
+                for (int offset = 0; offset < attackIds.size(); offset++) {
+                    int index = (attackCursor + offset) % attackIds.size();
+                    String candidate = attackIds.get(index);
+                    String token = normalizeAttackToken(candidate);
+                    if (!token.isEmpty() && (token.contains(desired) || desired.contains(token))) {
+                        attackCursor = (index + 1) % attackIds.size();
+                        return candidate;
+                    }
+                }
+            }
+            String fallback = attackIds.get(attackCursor);
+            attackCursor = (attackCursor + 1) % attackIds.size();
+            return fallback;
+        }
+
+        private static String normalizeAttackToken(String value) {
+            if (value == null) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder(value.length());
+            for (int i = 0; i < value.length(); i++) {
+                char c = Character.toLowerCase(value.charAt(i));
+                if (Character.isLetterOrDigit(c)) {
+                    sb.append(c);
+                }
+            }
+            return sb.toString();
+        }
+
+        double maxHeightPx(double layoutScale) {
+            return maxHeightBase > 0 ? maxHeightBase * layoutScale : Double.POSITIVE_INFINITY;
+        }
+
+        double maxWidthPx(double layoutScale) {
+            return maxWidthBase > 0 ? maxWidthBase * layoutScale : Double.POSITIVE_INFINITY;
+        }
+
+        void ensureWarmed(double layoutScale) {
+            if (!Double.isFinite(layoutScale) || layoutScale <= 0) {
+                return;
+            }
+            if (Double.isFinite(warmedScale) && Math.abs(warmedScale - layoutScale) < 1e-3) {
+                return;
+            }
+            sprite.forEachFrame(frame -> warmFrame(frame, layoutScale));
+            warmAttackFrames(layoutScale);
+            if (activeAttack != null) {
+                activeAttack.forEachFrame(frame -> warmFrame(frame, layoutScale));
+            }
+            warmedScale = layoutScale;
+        }
+
+        private void warmAttackFrames(double layoutScale) {
+            if (attackIds.isEmpty()) {
+                warmedAttacksScale = layoutScale;
+                return;
+            }
+            if (Double.isFinite(warmedAttacksScale) && Math.abs(warmedAttacksScale - layoutScale) < 1e-3) {
+                return;
+            }
+            for (String attackId : attackIds) {
+                BufferedImage[] frames;
+                try {
+                    frames = BossFXLibrary.attackFrames(attackId);
+                } catch (RuntimeException ex) {
+                    continue;
+                }
+                if (frames == null) {
+                    continue;
+                }
+                for (BufferedImage frame : frames) {
+                    warmFrame(frame, layoutScale);
+                }
+            }
+            warmedAttacksScale = layoutScale;
+        }
+
+        private void warmFrame(BufferedImage frame, double layoutScale) {
+            if (frame == null) {
+                return;
+            }
+            FrameSize size = scaledFrameSize(this, frame, layoutScale);
+            if (size.width() <= 0 || size.height() <= 0) {
+                return;
+            }
+            HiDpiScaler.scale(frame, size.width(), size.height());
         }
     }
 
@@ -590,10 +873,142 @@ public class BossBattlePanel extends JPanel {
         return sprite -> sprite.addFromPrefix(AnimatedSprite.State.IDLE, prefix);
     }
 
-    private static SpriteSource sheetSource(String resourcePath) {
-        Objects.requireNonNull(resourcePath, "resourcePath");
-        return sprite -> sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath);
+    private static SpriteSource directorySource(String resourceDirectory) {
+        Objects.requireNonNull(resourceDirectory, "resourceDirectory");
+        return sprite -> {
+            if (!sprite.addFromDirectory(AnimatedSprite.State.IDLE, resourceDirectory)) {
+                throw new IllegalStateException("Missing boss sprite frames for: " + resourceDirectory);
+            }
+        };
     }
+
+    private static final double FALLBACK_UPSCALE_FACTOR = 2.0;
+
+    private static SpriteChoice hiResBossSprite(String directoryKey, String fallbackPrefix) {
+        String dir = "/resources/bosses/" + directoryKey;
+        if (!ResourceLoader.listPng(dir).isEmpty()) {
+            return new SpriteChoice(directorySource(dir), 1.0);
+        }
+
+        BufferedImage[] fallbackFrames = AnimatedSprite.loadFramesFromPrefix(fallbackPrefix);
+        if (fallbackFrames.length == 0) {
+            throw new IllegalStateException("Missing fallback boss sprite frames for: " + fallbackPrefix);
+        }
+
+        BufferedImage[] upscaled = upscaleFrames(fallbackFrames, FALLBACK_UPSCALE_FACTOR);
+        SpriteSource source = sprite -> sprite.add(AnimatedSprite.State.IDLE, upscaled);
+        return new SpriteChoice(source, FALLBACK_UPSCALE_FACTOR);
+    }
+
+    private static boolean hasBossDirectory(String directoryKey) {
+        if (directoryKey == null || directoryKey.isBlank()) {
+            return false;
+        }
+        return !ResourceLoader.listPng("/resources/bosses/" + directoryKey).isEmpty();
+    }
+
+    private static BufferedImage[] upscaleFrames(BufferedImage[] frames, double factor) {
+        if (frames == null || frames.length == 0 || !Double.isFinite(factor) || factor <= 1.0) {
+            return frames == null ? null : frames.clone();
+        }
+
+        BufferedImage[] scaled = new BufferedImage[frames.length];
+        for (int i = 0; i < frames.length; i++) {
+            BufferedImage frame = frames[i];
+            if (frame == null) {
+                continue;
+            }
+            int targetWidth = Math.max(1, (int) Math.round(frame.getWidth() * factor));
+            int targetHeight = Math.max(1, (int) Math.round(frame.getHeight() * factor));
+            scaled[i] = HiDpiScaler.scale(frame, targetWidth, targetHeight);
+        }
+        return AnimatedSprite.normaliseFrames(scaled);
+    }
+
+    private static BossDefinition hiResBossDefinition(String displayName, Affinity affinity, Stats stats,
+                                                      String directoryKey, String fallbackPrefix,
+                                                      double baseScale, double maxHeight,
+                                                      double offenseMod, double defenseMod, int momentumEdge,
+                                                      List<String> attackIds) {
+        SpriteChoice choice = hiResBossSprite(directoryKey, fallbackPrefix);
+        double compensation = choice.scaleCompensation();
+        if (!Double.isFinite(compensation) || compensation <= 0.0) {
+            compensation = 1.0;
+        }
+        double effectiveScale = baseScale / compensation;
+        return new BossDefinition(displayName, affinity, stats, choice.source(), effectiveScale,
+                maxHeight, offenseMod, defenseMod, momentumEdge, attackIds);
+    }
+
+    private record SpriteChoice(SpriteSource source, double scaleCompensation) {
+        private SpriteChoice {
+            Objects.requireNonNull(source, "source");
+        }
+    }
+
+    private static List<String> bossAttackIds(String attackKey) {
+        if (attackKey == null || attackKey.isBlank()) {
+            return List.of();
+        }
+        List<String> dirs = ResourceLoader.listDirectories("/resources/bosses/attacks");
+        if (dirs.isEmpty()) {
+            return List.of();
+        }
+        String normalized = attackKey.toLowerCase(Locale.ROOT);
+        List<String> matches = new ArrayList<>();
+        for (String dir : dirs) {
+            String name = dir;
+            int slash = name.lastIndexOf('/');
+            if (slash >= 0) {
+                name = name.substring(slash + 1);
+            }
+            if (name.toLowerCase(Locale.ROOT).startsWith(normalized)) {
+                matches.add(name);
+            }
+        }
+        if (matches.isEmpty()) {
+            return List.of();
+        }
+        matches.sort(BossBattlePanel::compareAttackNames);
+        return List.copyOf(matches);
+    }
+
+    private static int compareAttackNames(String left, String right) {
+        AttackNameKey a = attackNameKey(left);
+        AttackNameKey b = attackNameKey(right);
+        int cmp = a.prefix.compareTo(b.prefix);
+        if (cmp != 0) {
+            return cmp;
+        }
+        return Integer.compare(a.number, b.number);
+    }
+
+    private static AttackNameKey attackNameKey(String value) {
+        if (value == null) {
+            return new AttackNameKey("", -1);
+        }
+        String name = value;
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0) {
+            name = name.substring(0, dot);
+        }
+        int idx = name.length() - 1;
+        while (idx >= 0 && Character.isDigit(name.charAt(idx))) {
+            idx--;
+        }
+        String prefix = name.substring(0, idx + 1).toLowerCase(Locale.ROOT);
+        int number = -1;
+        if (idx + 1 < name.length()) {
+            try {
+                number = Integer.parseInt(name.substring(idx + 1));
+            } catch (NumberFormatException ignored) {
+                number = -1;
+            }
+        }
+        return new AttackNameKey(prefix, number);
+    }
+
+    private record AttackNameKey(String prefix, int number) { }
 
     // ---------------------------------------------------------------------
     // Floating text
@@ -667,46 +1082,64 @@ public class BossBattlePanel extends JPanel {
 
         static HeroDefinition defaultHero() {
             return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(240, 28, 20, 18),
-                    prefixSource("/resources/sprites/Knight/Idle/knight_m_idle_anim_f"), 1.12, 1.18, 2);
+                    prefixSource("/resources/sprites/Knight/Idle/knight_m_idle_anim_f"), 1.08, 1.18, 2);
         }
     }
 
     private record BossDefinition(String displayName, Affinity affinity, Stats stats, SpriteSource sprite, double scale,
-                                  double offenseMod, double defenseMod, int momentumEdge) {
+                                  double maxHeight, double offenseMod, double defenseMod, int momentumEdge,
+                                  List<String> attackIds) {
+        private BossDefinition {
+            attackIds = attackIds == null || attackIds.isEmpty() ? List.of() : List.copyOf(attackIds);
+        }
         Fighter toFighter() {
             return new Fighter(displayName, affinity, stats.copy(), offenseMod, defenseMod);
         }
 
         static BossDefinition of(BossKind kind) {
             return switch (kind) {
-                case OGRE_WARLORD -> new BossDefinition("Ogre Warlord", Affinity.STONE,
-                        new Stats(230, 21, 15, 11), prefixSource("/resources/sprites/Ogre/ogre_idle_anim_f"), 3.5, 0.96, 1.02, 1);
-                case SKELETON_LORD -> new BossDefinition("Skeleton Lord", Affinity.VERDANT,
-                        new Stats(195, 18, 12, 22), prefixSource("/resources/sprites/Skeleton/skelet_idle_anim_f"), 3.3, 0.92, 0.94, 0);
-                case PUMPKIN_KING -> new BossDefinition("Pumpkin King", Affinity.EMBER,
-                        new Stats(210, 19, 17, 15), prefixSource("/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f"), 3.4, 0.94, 1.02, 0);
-                case IMP_OVERLORD -> new BossDefinition("Imp Overlord", Affinity.STORM,
-                        new Stats(185, 20, 11, 24), prefixSource("/resources/sprites/Imp/imp_idle_anim_f"), 3.6, 0.98, 0.9, 0);
-                case WIZARD_ARCHON -> new BossDefinition("Wizard Archon", Affinity.STORM,
-                        new Stats(200, 22, 12, 19), prefixSource("/resources/sprites/Wizard/wizzard_m_idle_anim_f"), 3.6, 0.99, 0.92, 1);
-                case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
-                        new Stats(265, 17, 21, 9), prefixSource("/resources/sprites/Bigzombie/big_zombie_idle_anim_f"), 3.8, 0.88, 1.12, -1);
+                case OGRE_WARLORD -> hiResBossDefinition("Ogre Warlord", Affinity.STONE,
+                        new Stats(230, 21, 15, 11), "ogreWarlord", "/resources/sprites/Ogre/ogre_idle_anim_f", 0.88,
+                        Double.NaN, 0.96, 1.02, 1, List.of());
+                case SKELETON_LORD -> hiResBossDefinition("Skeleton Lord", Affinity.VERDANT,
+                        new Stats(195, 18, 12, 22), "skeletonLord", "/resources/sprites/Skeleton/skelet_idle_anim_f", 0.85,
+                        Double.NaN, 0.92, 0.94, 0, List.of());
+                case PUMPKIN_KING -> hiResBossDefinition("Pumpkin King", Affinity.EMBER,
+                        new Stats(210, 19, 17, 15), "pumpkinKing", "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 0.86,
+                        Double.NaN, 0.94, 1.02, 0, List.of());
+                case IMP_OVERLORD -> hiResBossDefinition("Imp Overlord", Affinity.STORM,
+                        new Stats(185, 20, 11, 24), "impOverlord", "/resources/sprites/Imp/imp_idle_anim_f", 0.92,
+                        Double.NaN, 0.98, 0.9, 0, List.of());
+                case WIZARD_ARCHON -> hiResBossDefinition("Wizard Archon", Affinity.STORM,
+                        new Stats(200, 22, 12, 19), "wizardArchon", "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 0.92,
+                        Double.NaN, 0.99, 0.92, 1, List.of());
+                case BIG_ZOMBIE -> hiResBossDefinition("Dread Husk", Affinity.STONE,
+                        new Stats(265, 17, 21, 9), "dreadHusk", "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 0.95,
+                        Double.NaN, 0.88, 1.12, -1, List.of());
                 case GOLLUM -> new BossDefinition("Gollum", Affinity.STORM,
-                        new Stats(205, 23, 13, 27), sheetSource("/resources/bosses/gollum.png"), 1.6, 1.05, 0.92, 1);
+                        new Stats(205, 23, 13, 27), directorySource("/resources/bosses/Gollum"), 1.6,
+                        Double.NaN, 1.05, 0.92, 1, bossAttackIds("Gollum"));
                 case GRIM -> new BossDefinition("Grim", Affinity.STONE,
-                        new Stats(245, 26, 18, 18), sheetSource("/resources/bosses/grim.png"), 1.5, 1.1, 1.05, 0);
+                        new Stats(245, 26, 18, 18), directorySource("/resources/bosses/Grim"), 1.5,
+                        Double.NaN, 1.1, 1.05, 0, bossAttackIds("Grim"));
                 case FIRE_FLINGER -> new BossDefinition("Fire Flinger", Affinity.EMBER,
-                        new Stats(215, 24, 14, 23), sheetSource("/resources/bosses/fireFlinger.png"), 1.1, 1.08, 0.95, 1);
+                        new Stats(215, 24, 14, 23), directorySource("/resources/bosses/fireFlinger"), 1.1,
+                        Double.NaN, 1.08, 0.95, 1, bossAttackIds("fireFlinger"));
                 case GOLD_MECH -> new BossDefinition("Gold Mech", Affinity.STONE,
-                        new Stats(320, 28, 25, 12), sheetSource("/resources/bosses/goldMech.png"), 0.6, 1.05, 1.15, -1);
+                        new Stats(320, 28, 25, 12), directorySource("/resources/bosses/goldMech"), 0.6,
+                        Double.NaN, 1.05, 1.15, -1, bossAttackIds("goldMech"));
                 case GOLDEN_KNIGHT -> new BossDefinition("Golden Knight", Affinity.STONE,
-                        new Stats(260, 27, 22, 16), sheetSource("/resources/bosses/goldenKnight.png"), 1.3, 1.1, 1.08, 0);
+                        new Stats(260, 27, 22, 16), directorySource("/resources/bosses/goldenKnight"), 1.3,
+                        Double.NaN, 1.1, 1.08, 0, bossAttackIds("goldenKnight"));
                 case PURPLE_EMPRESS -> new BossDefinition("Purple Empress", Affinity.STORM,
-                        new Stats(210, 25, 15, 25), sheetSource("/resources/bosses/purpleEmpress.png"), 0.85, 1.12, 0.96, 1);
+                        new Stats(210, 25, 15, 25), directorySource("/resources/bosses/purpleEmpress"), 0.85,
+                        Double.NaN, 1.12, 0.96, 1, bossAttackIds("purpleEmpress"));
                 case THE_WELCH -> new BossDefinition("The Welch", Affinity.STORM,
-                        new Stats(285, 22, 20, 18), sheetSource("/resources/bosses/theWelch.png"), 0.55, 1.0, 1.05, 0);
+                        new Stats(285, 22, 20, 18), directorySource("/resources/bosses/theWelch"), 0.55,
+                        Double.NaN, 1.0, 1.05, 0, bossAttackIds("theWelch"));
                 case TOXIC_TREE -> new BossDefinition("Toxic Tree", Affinity.VERDANT,
-                        new Stats(270, 24, 19, 14), sheetSource("/resources/bosses/toxicTree.png"), 1.45, 1.06, 1.1, -1);
+                        new Stats(270, 24, 19, 14), directorySource("/resources/bosses/toxicTree"), 1.45,
+                        Double.NaN, 1.06, 1.1, -1, bossAttackIds("toxicTree"));
             };
         }
     }
@@ -721,6 +1154,12 @@ public class BossBattlePanel extends JPanel {
         private int momentum;
         private boolean over = false;
         private boolean heroSecondWindAvailable = true;
+        private boolean bossFortified = false;
+        private boolean bossEnraged = false;
+        private boolean bossRallied = false;
+        private int heroRepeatChain = 0;
+        private int heroRepeatTrigger = 0;
+        private int bossAdaptStacks = 0;
 
         private BattleEngine(Fighter hero, Fighter boss, int initialMomentum, Consumer<Outcome> onEnd) {
             this.hero = hero;
@@ -791,8 +1230,34 @@ public class BossBattlePanel extends JPanel {
                 out.messages.add(user.name + " uses " + tech.name + "!");
             }
 
+            out.events.add(Event.attack(user, tech));
+
+            if (user == hero) {
+                if (user.lastUsed == tech) {
+                    heroRepeatChain = Math.min(heroRepeatChain + 1, 6);
+                } else {
+                    heroRepeatChain = 1;
+                    heroRepeatTrigger = 0;
+                    if (bossAdaptStacks > 0) {
+                        bossAdaptStacks--;
+                        boss.base.guard = Math.max(1, boss.base.guard - 1);
+                        out.messages.add(boss.name + " relaxes, losing some defensive rhythm.");
+                        out.events.add(Event.status(boss, "Guard ↓"));
+                    }
+                }
+                if (heroRepeatChain >= 2 && heroRepeatChain > heroRepeatTrigger && bossAdaptStacks < 3) {
+                    heroRepeatTrigger = heroRepeatChain;
+                    bossAdaptStacks++;
+                    boss.base.guard += 1;
+                    out.messages.add(boss.name + " anticipates the pattern and fortifies its stance!");
+                    out.events.add(Event.guard(boss, "Guard ↑"));
+                    momentum = Math.max(-3, momentum - 1);
+                }
+            }
+
             if (user.status == Status.ROOTED && tech.tag == Tag.CHARGE) {
                 out.messages.add(user.name + " is rooted and cannot charge!");
+                user.lastUsed = tech;
                 return;
             }
 
@@ -800,6 +1265,7 @@ public class BossBattlePanel extends JPanel {
                 out.messages.add("It misses!");
                 out.events.add(Event.miss(user, target, tech));
                 setCooldown(user, tech);
+                user.lastUsed = tech;
                 return;
             }
 
@@ -807,6 +1273,7 @@ public class BossBattlePanel extends JPanel {
                 user.charging = tech;
                 out.messages.add(user.name + " gathers power...");
                 setCooldown(user, tech);
+                user.lastUsed = tech;
                 return;
             }
 
@@ -837,6 +1304,7 @@ public class BossBattlePanel extends JPanel {
             }
 
             setCooldown(user, tech);
+            user.lastUsed = tech;
         }
 
         private void applyOnHit(Technique tech, Fighter user, Fighter target, RoundOutcome out) {
@@ -887,10 +1355,41 @@ public class BossBattlePanel extends JPanel {
                     out.events.add(Event.guard(fighter, "Guard ↑"));
                 }
             }
+            if (fighter == boss && fighter.hp > 0) {
+                handleBossPhases(out);
+            }
             List<Technique> cooldowns = new ArrayList<>(fighter.cd.keySet());
             for (Technique t : cooldowns) {
                 int left = fighter.cd.get(t);
                 if (left > 0) fighter.cd.put(t, left - 1);
+            }
+        }
+
+        private void handleBossPhases(RoundOutcome out) {
+            double ratio = boss.hp / (double) Math.max(1, boss.base.hp);
+            if (!bossFortified && ratio <= 0.75) {
+                bossFortified = true;
+                boss.base.guard += 3;
+                out.messages.add(boss.name + " steels its defenses!");
+                out.events.add(Event.guard(boss, "Guard ↑"));
+            }
+            if (!bossEnraged && ratio <= 0.5) {
+                bossEnraged = true;
+                boss.base.power += 4;
+                out.messages.add(boss.name + " channels a battle fury!");
+                out.events.add(Event.status(boss, "Power ↑"));
+            }
+            if (!bossRallied && ratio <= 0.3) {
+                bossRallied = true;
+                int before = boss.hp;
+                int heal = Math.max(18, boss.base.hp / 4);
+                boss.hp = Math.min(boss.base.hp, boss.hp + heal);
+                int healed = boss.hp - before;
+                out.messages.add(boss.name + " refuses to fall!");
+                if (healed > 0) {
+                    out.events.add(Event.heal(boss, boss, healed));
+                }
+                boss.base.guard += 1;
             }
         }
 
@@ -918,7 +1417,7 @@ public class BossBattlePanel extends JPanel {
     // Round outcome structure
     // ---------------------------------------------------------------------
     private static class Event {
-        enum Type { DAMAGE, DOT, HEAL, MISS, STATUS, GUARD, INTERRUPT }
+        enum Type { DAMAGE, DOT, HEAL, MISS, STATUS, GUARD, INTERRUPT, ATTACK }
         final Type type;
         final Fighter actor;
         final Fighter target;
@@ -965,6 +1464,10 @@ public class BossBattlePanel extends JPanel {
 
         static Event interrupt(Fighter actor, Fighter target, Technique tech) {
             return new Event(Type.INTERRUPT, actor, target, tech, 0, false, 1.0, null);
+        }
+
+        static Event attack(Fighter actor, Technique tech) {
+            return new Event(Type.ATTACK, actor, actor, tech, 0, false, 1.0, null);
         }
     }
 

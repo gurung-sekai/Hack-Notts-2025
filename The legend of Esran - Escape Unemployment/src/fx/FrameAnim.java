@@ -1,23 +1,44 @@
 package fx;
 
 import util.ResourceLoader;
-import util.SpriteSheetSlicer;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /** Frame-by-frame animation helper (for VFX). */
 public class FrameAnim {
     private final BufferedImage[] frames;
     private final double fps;
     private final boolean loop;
+    private final int maxWidth;
+    private final int maxHeight;
     private double t = 0;
     private int i = 0;
+    private boolean finished = false;
 
     private FrameAnim(BufferedImage[] fr, double fps, boolean loop) {
-        this.frames = fr; this.fps = fps; this.loop = loop;
+        this.frames = fr;
+        this.fps = fps;
+        this.loop = loop;
+        int w = 0;
+        int h = 0;
+        for (BufferedImage frame : fr) {
+            if (frame == null) {
+                continue;
+            }
+            if (frame.getWidth() > w) {
+                w = frame.getWidth();
+            }
+            if (frame.getHeight() > h) {
+                h = frame.getHeight();
+            }
+        }
+        this.maxWidth = w;
+        this.maxHeight = h;
     }
 
     /** Load numbered sequence: base + "1..N" + ext (e.g., FX001_01.png..). */
@@ -56,29 +77,40 @@ public class FrameAnim {
         return new FrameAnim(frames.clone(), fps, loop);
     }
 
-    /** Slice a sheet with irregular spacing using {@link SpriteSheetSlicer}. */
-    public static FrameAnim fromIrregularSheet(String resourcePath, double fps, boolean loop) {
-        return fromIrregularSheet(resourcePath, SpriteSheetSlicer.Options.DEFAULT, fps, loop);
-    }
-
-    /** Slice a sheet with irregular spacing using {@link SpriteSheetSlicer}. */
-    public static FrameAnim fromIrregularSheet(String resourcePath, SpriteSheetSlicer.Options options, double fps, boolean loop) {
-        try {
-            BufferedImage[] frames = SpriteSheetSlicer.slice(resourcePath, options);
-            return fromFrames(frames, fps, loop);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to slice sheet: " + resourcePath, e);
+    public void update(double dt) {
+        if (finished || frames.length <= 1) {
+            return;
+        }
+        t += dt;
+        double fpf = 1.0 / fps;
+        while (t >= fpf) {
+            t -= fpf;
+            if (i < frames.length - 1) {
+                i++;
+            } else if (loop) {
+                i = 0;
+            } else {
+                finished = true;
+                t = 0;
+                break;
+            }
         }
     }
 
-    public void update(double dt) {
-        if (frames.length <= 1) return;
-        t += dt; double fpf = 1.0 / fps;
-        while (t >= fpf) { t -= fpf; i++; if (i >= frames.length) i = loop ? 0 : frames.length - 1; }
-    }
-
     public BufferedImage frame() { return frames[Math.min(i, frames.length - 1)]; }
-    public boolean finished() { return !loop && i == frames.length - 1 && t == 0; }
-    public int w() { return frames[0].getWidth(); }
-    public int h() { return frames[0].getHeight(); }
+    public boolean finished() { return finished; }
+    public double duration() { return frames.length / Math.max(1.0, fps); }
+    public int w() { return maxWidth; }
+    public int h() { return maxHeight; }
+    public int maxWidth() { return maxWidth; }
+    public int maxHeight() { return maxHeight; }
+
+    public void forEachFrame(Consumer<BufferedImage> consumer) {
+        Objects.requireNonNull(consumer, "consumer");
+        for (BufferedImage frame : frames) {
+            if (frame != null) {
+                consumer.accept(frame);
+            }
+        }
+    }
 }
