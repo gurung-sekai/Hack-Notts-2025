@@ -1,7 +1,6 @@
 package gfx;
 
 import util.ResourceLoader;
-import util.SpriteSheetSlicer;
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
@@ -9,7 +8,9 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -48,11 +49,6 @@ public class AnimatedSprite {
         }
         add(s, frames);
         return true;
-    }
-
-    /** Slice an irregular sheet using {@link SpriteSheetSlicer}. */
-    public void addFromSheet(State state, String resourcePath) {
-        addFromSheet(state, resourcePath, SpriteSheetSlicer.Options.DEFAULT);
     }
 
     /** Attempt to load a frame sequence with flexible numbering (0/1-based, padded). */
@@ -122,12 +118,76 @@ public class AnimatedSprite {
         return null;
     }
 
-    /** Slice an irregular sheet using {@link SpriteSheetSlicer}. */
-    public void addFromSheet(State state, String resourcePath, SpriteSheetSlicer.Options options) {
-        try {
-            add(state, SpriteSheetSlicer.slice(resourcePath, options));
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to slice sprite sheet: " + resourcePath, e);
+    /** Load all PNG frames that live directly under a resource directory. */
+    public static BufferedImage[] loadFramesFromDirectory(String resourceDirectory) {
+        List<String> resources = ResourceLoader.listPng(resourceDirectory);
+        if (resources.isEmpty()) {
+            return new BufferedImage[0];
+        }
+
+        resources.sort(AnimatedSprite::compareFramePaths);
+        List<BufferedImage> frames = new ArrayList<>(resources.size());
+        for (String resource : resources) {
+            try {
+                frames.add(ResourceLoader.image(resource));
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to load sprite frame: " + resource, e);
+            }
+        }
+        return frames.toArray(new BufferedImage[0]);
+    }
+
+    /** Populate this sprite from all PNG frames inside a directory. */
+    public boolean addFromDirectory(State state, String resourceDirectory) {
+        BufferedImage[] frames = loadFramesFromDirectory(resourceDirectory);
+        if (frames.length == 0) {
+            return false;
+        }
+        add(state, frames);
+        return true;
+    }
+
+    private static int compareFramePaths(String left, String right) {
+        return Comparator.comparing(AnimatedSprite::frameKey)
+                .thenComparing(String::compareTo)
+                .compare(left, right);
+    }
+
+    private static FrameKey frameKey(String resourcePath) {
+        String filename = resourcePath;
+        int slash = filename.lastIndexOf('/');
+        if (slash >= 0) {
+            filename = filename.substring(slash + 1);
+        }
+        int dot = filename.lastIndexOf('.');
+        if (dot >= 0) {
+            filename = filename.substring(0, dot);
+        }
+
+        int idx = filename.length() - 1;
+        while (idx >= 0 && Character.isDigit(filename.charAt(idx))) {
+            idx--;
+        }
+        String prefix = filename.substring(0, idx + 1);
+        int number = -1;
+        if (idx + 1 < filename.length()) {
+            try {
+                number = Integer.parseInt(filename.substring(idx + 1));
+            } catch (NumberFormatException ignored) {
+                number = -1;
+            }
+        }
+        return new FrameKey(prefix.toLowerCase(Locale.ROOT), number);
+    }
+
+    private record FrameKey(String prefix, int number) implements Comparable<FrameKey> {
+        @Override
+        public int compareTo(FrameKey other) {
+            int cmp = prefix.compareTo(other.prefix);
+            if (cmp != 0) {
+                return cmp;
+            }
+            return Integer.compare(number, other.number);
         }
     }
 

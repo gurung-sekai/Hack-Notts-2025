@@ -4,14 +4,23 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.JarURLConnection;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Predicate;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 /**
  * Lightweight helper that tries both the classpath and common filesystem roots when loading art assets.
@@ -80,6 +89,41 @@ public final class ResourceLoader {
         }
     }
 
+    /**
+     * Enumerate resources that live directly under the supplied directory.
+     * <p>
+     * The lookup mirrors {@link #open(String)} by considering both the runtime classpath and the filesystem
+     * search roots used during development.  Returned paths are normalised with a leading slash so the caller can
+     * pass them straight back into {@link #open(String)} or {@link #image(String)}.
+     *
+     * @param resourceDirectory classpath-style directory path (e.g. {@code /resources/bosses/Gollum})
+     * @param filter predicate that receives the normalised file name (without any path prefixes) and decides whether
+     *               it should be included in the results
+     * @return ordered list of resource paths relative to the classpath root
+     */
+    public static List<String> list(String resourceDirectory, Predicate<String> filter) {
+        Objects.requireNonNull(filter, "filter");
+        String normalizedDir = normalizeDirectory(resourceDirectory);
+        String normalizedDirNoSlash = normalizedDir.endsWith("/")
+                ? normalizedDir.substring(0, normalizedDir.length() - 1)
+                : normalizedDir;
+
+        Set<String> resources = new TreeSet<>();
+
+        collectFromClassLoader(resources, normalizedDir, filter);
+        collectFromClassLoader(resources, normalizedDirNoSlash, filter);
+        collectFromSearchRoots(resources, normalizedDirNoSlash, filter);
+
+        return new ArrayList<>(resources);
+    }
+
+    /**
+     * Enumerate PNG resources that live directly under the supplied directory.
+     */
+    public static List<String> listPng(String resourceDirectory) {
+        return list(resourceDirectory, name -> name.toLowerCase(Locale.ROOT).endsWith(".png"));
+    }
+
     private static String normalize(String path) {
         Objects.requireNonNull(path, "path");
         String trimmed = path.trim();
@@ -100,6 +144,112 @@ public final class ResourceLoader {
         // Normalise separators so classpath lookup remains stable and directory traversal is prevented in line with
         // UK National Cyber Security Centre (NCSC) platform security guidance.
         return candidate.toString().replace('\\', '/');
+    }
+
+    private static String normalizeDirectory(String path) {
+        String normalized = normalize(path);
+        return normalized.endsWith("/") ? normalized : normalized + "/";
+    }
+
+    private static void collectFromClassLoader(Set<String> resources, String normalizedDir, Predicate<String> filter) {
+        if (normalizedDir.isEmpty()) {
+            return;
+        }
+        ClassLoader context = Thread.currentThread().getContextClassLoader();
+        ClassLoader fallback = ResourceLoader.class.getClassLoader();
+        collectFromLoader(resources, context, normalizedDir, filter);
+        if (fallback != context) {
+            collectFromLoader(resources, fallback, normalizedDir, filter);
+        }
+    }
+
+    private static void collectFromLoader(Set<String> resources, ClassLoader loader, String normalizedDir,
+                                          Predicate<String> filter) {
+        if (loader == null) {
+            return;
+        }
+        try {
+            Enumeration<URL> urls = loader.getResources(normalizedDir);
+            while (urls.hasMoreElements()) {
+                URL url = urls.nextElement();
+                collectFromUrl(resources, normalizedDir, url, filter);
+            }
+        } catch (IOException ignored) {
+            // Fallback to filesystem search roots if the classloader cannot enumerate entries.
+        }
+    }
+
+    private static void collectFromUrl(Set<String> resources, String normalizedDir, URL url,
+                                       Predicate<String> filter) {
+        String protocol = url.getProtocol();
+        if ("file".equals(protocol)) {
+            try {
+                Path dir = Paths.get(url.toURI());
+                if (Files.isDirectory(dir)) {
+                    try (var stream = Files.list(dir)) {
+                        stream.filter(Files::isRegularFile)
+                                .forEach(path -> addIfMatches(resources, normalizedDir, path.getFileName().toString(), filter));
+                    }
+                }
+            } catch (IOException | URISyntaxException ignored) {
+                // Ignore and fall back to explicit search roots.
+            }
+        } else if ("jar".equals(protocol)) {
+            try {
+                JarURLConnection connection = (JarURLConnection) url.openConnection();
+                try (JarFile jar = connection.getJarFile()) {
+                    String entryPrefix = connection.getEntryName();
+                    String normalizedPrefix = (entryPrefix == null || entryPrefix.isBlank())
+                            ? normalizedDir
+                            : (entryPrefix.endsWith("/") ? entryPrefix : entryPrefix + "/");
+                    jar.stream()
+                            .filter(entry -> !entry.isDirectory())
+                            .forEach(entry -> addJarEntry(resources, normalizedPrefix, entry, filter));
+                }
+            } catch (IOException ignored) {
+                // Ignore jar enumeration failures.
+            }
+        }
+    }
+
+    private static void addJarEntry(Set<String> resources, String normalizedPrefix, JarEntry entry,
+                                    Predicate<String> filter) {
+        String name = entry.getName();
+        if (!name.startsWith(normalizedPrefix)) {
+            return;
+        }
+        String remainder = name.substring(normalizedPrefix.length());
+        if (remainder.isEmpty() || remainder.contains("/")) {
+            return;
+        }
+        if (filter.test(remainder)) {
+            resources.add("/" + name);
+        }
+    }
+
+    private static void collectFromSearchRoots(Set<String> resources, String normalizedDir,
+                                               Predicate<String> filter) {
+        for (Path root : SEARCH_ROOTS) {
+            Path dir = root.resolve(normalizedDir);
+            if (!Files.isDirectory(dir)) {
+                continue;
+            }
+            try (var stream = Files.list(dir)) {
+                stream.filter(Files::isRegularFile)
+                        .forEach(path -> addIfMatches(resources, normalizedDir, path.getFileName().toString(), filter));
+            } catch (IOException ignored) {
+                // Ignore directories that vanish mid-enumeration.
+            }
+        }
+    }
+
+    private static void addIfMatches(Set<String> resources, String normalizedDir, String filename,
+                                     Predicate<String> filter) {
+        if (!filter.test(filename)) {
+            return;
+        }
+        String base = normalizedDir.endsWith("/") ? normalizedDir : normalizedDir + "/";
+        resources.add("/" + base + filename);
     }
 
     private static List<Path> buildSearchRoots() {
