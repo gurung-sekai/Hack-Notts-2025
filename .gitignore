@@ -1,0 +1,7 @@
+.gradle/
+build/
+extractor/build/
+extractor/.gradle/
+"The legend of Esran - Escape Unemployment"/.gradle/
+"The legend of Esran - Escape Unemployment"/build/
+*.log
