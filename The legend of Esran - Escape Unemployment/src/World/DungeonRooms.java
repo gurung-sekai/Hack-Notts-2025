@@ -3,6 +3,7 @@ package World;
 import World.gfx.DungeonTextures;
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
+import gfx.HiDpiScaler;
 import launcher.ControlAction;
 import launcher.ControlsProfile;
 import launcher.GameLauncher;
@@ -29,6 +30,8 @@ import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 
 import java.awt.event.ActionEvent;
@@ -46,6 +49,7 @@ import java.io.Serializable;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -88,7 +92,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     enum EnemyType { ZOMBIE, IMP, KNIGHT, OGRE, PUMPKIN, SKELETON, WIZARD }
 
-    static class Enemy implements Serializable {
+    enum WeaponType { CLAWS, SWORD, HAMMER, BOW, STAFF }
+
+    enum ProjectileKind { ORB, ARROW }
+
+    static class RoomEnemy implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
         int x, y;
@@ -103,6 +111,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int patternIndex = 0;
         double damageBuffer = 0.0;
         EnemySpawn spawn;
+        WeaponType weapon = WeaponType.CLAWS;
+        int attackAnimTicks = 0;
+        int attackAnimDuration = 0;
+        int bowDrawTicks = 0;
+        double facingAngle = 0.0;
+        double weaponAngle = 0.0;
     }
 
     static class Bullet implements Serializable {
@@ -121,6 +135,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         boolean explosive = false;
         int explosionRadius = 0;
         int explosionLife = 0;
+        ProjectileKind kind = ProjectileKind.ORB;
     }
 
     static class Explosion implements Serializable {
@@ -162,7 +177,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         private static final long serialVersionUID = 1L;
         T[][] g = new T[COLS][ROWS];
         Set<Dir> doors = EnumSet.noneOf(Dir.class);
-        List<Enemy> enemies = new ArrayList<>();
+        List<RoomEnemy> enemies = new ArrayList<>();
         List<KeyPickup> keyPickups = new ArrayList<>();
         List<EnemySpawn> enemySpawns = new ArrayList<>();
         EnumSet<Dir> lockedDoors = EnumSet.noneOf(Dir.class);
@@ -170,12 +185,78 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         boolean spawnsPrepared = false;
         int floorThemeSeed = 0;
         int wallThemeSeed = 0;
+        int paletteIndex = -1;
+        int accentSeed = 0;
         Room() {
             for (int x = 0; x < COLS; x++)
                 for (int y = 0; y < ROWS; y++)
                     g[x][y] = T.VOID;
         }
     }
+
+    static class RoomPalette {
+        final Color floorTint;
+        final float floorAlpha;
+        final Color floorAccent;
+        final Color wallTint;
+        final float wallAlpha;
+        final Color wallHighlight;
+        final Color wallShadow;
+
+        RoomPalette(Color floorTint,
+                    float floorAlpha,
+                    Color floorAccent,
+                    Color wallTint,
+                    float wallAlpha,
+                    Color wallHighlight,
+                    Color wallShadow) {
+            this.floorTint = floorTint;
+            this.floorAlpha = floorAlpha;
+            this.floorAccent = floorAccent;
+            this.wallTint = wallTint;
+            this.wallAlpha = wallAlpha;
+            this.wallHighlight = wallHighlight;
+            this.wallShadow = wallShadow;
+        }
+    }
+
+    private static final RoomPalette[] ROOM_PALETTES = {
+            new RoomPalette(
+                    new Color(36, 90, 120), 0.26f,
+                    new Color(90, 140, 170, 140),
+                    new Color(20, 36, 54), 0.34f,
+                    new Color(220, 240, 255, 130),
+                    new Color(12, 20, 28, 150)
+            ),
+            new RoomPalette(
+                    new Color(88, 48, 120), 0.24f,
+                    new Color(150, 100, 180, 130),
+                    new Color(40, 22, 58), 0.36f,
+                    new Color(240, 220, 255, 120),
+                    new Color(18, 8, 26, 170)
+            ),
+            new RoomPalette(
+                    new Color(70, 96, 42), 0.22f,
+                    new Color(130, 168, 94, 130),
+                    new Color(32, 44, 24), 0.32f,
+                    new Color(210, 232, 190, 120),
+                    new Color(18, 24, 16, 150)
+            ),
+            new RoomPalette(
+                    new Color(120, 76, 32), 0.24f,
+                    new Color(176, 120, 60, 140),
+                    new Color(54, 32, 16), 0.34f,
+                    new Color(240, 214, 170, 120),
+                    new Color(28, 16, 10, 160)
+            ),
+            new RoomPalette(
+                    new Color(48, 72, 110), 0.28f,
+                    new Color(120, 150, 190, 130),
+                    new Color(26, 34, 54), 0.30f,
+                    new Color(225, 230, 250, 130),
+                    new Color(14, 18, 28, 160)
+            )
+    };
 
     private static final int MESSAGE_SECONDS = 3;
     private static final int MAX_PLAYER_HP = 5;
@@ -211,7 +292,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private DungeonTextures textures;
     private BufferedImage[] playerIdleFrames;
-    private BufferedImage[] enemyIdleFrames;
+    private Map<EnemyType, BufferedImage[]> enemyIdleAnimations = new EnumMap<>(EnemyType.class);
+    private transient Map<WeaponType, BufferedImage> weaponTextures = new EnumMap<>(WeaponType.class);
+    private transient Map<WeaponCacheKey, BufferedImage> scaledWeaponCache = new HashMap<>();
+    private transient Map<Integer, BufferedImage> scaledArrowCache = new HashMap<>();
+    private transient BufferedImage arrowTexture;
+    private BufferedImage[] defaultEnemyFrames;
     private BufferedImage[] bossIdleFrames;
     private BufferedImage playerShotTexture;
     private BufferedImage enemyShotTexture;
@@ -354,19 +440,29 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void refreshArtAssets() {
-        textures = DungeonTextures.load();
+        textures = DungeonTextures.load(TILE);
         playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
         if (playerIdleFrames == null) {
             playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
         }
-        enemyIdleFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
-        if (enemyIdleFrames == null) {
-            enemyIdleFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        playerIdleFrames = ensureScaledFrames(playerIdleFrames, PLAYER_SIZE, PLAYER_SIZE);
+        defaultEnemyFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
+        if (defaultEnemyFrames == null) {
+            defaultEnemyFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+        }
+        defaultEnemyFrames = ensureScaledFrames(defaultEnemyFrames, defaultEnemySize(EnemyType.ZOMBIE));
+        enemyIdleAnimations.clear();
+        for (EnemyType type : EnemyType.values()) {
+            enemyIdleAnimations.put(type,
+                    ensureScaledFrames(loadEnemyAnimation(type), defaultEnemySize(type)));
         }
         bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
         if (bossIdleFrames == null) {
             bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
         }
+        bossIdleFrames = ensureScaledFrames(bossIdleFrames, (int) (TILE * 1.4));
+        weaponTextures = new EnumMap<>(WeaponType.class);
+        loadWeaponTextures();
         playerShotTexture = createProjectileTexture(
                 new Color(212, 247, 255, 255),
                 new Color(112, 206, 255, 220),
@@ -394,6 +490,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
             if (b.tint == null && !b.friendly) {
                 b.useTexture = true;
+            }
+            if (b.kind == null) {
+                b.kind = ProjectileKind.ORB;
             }
         }
     }
@@ -434,6 +533,31 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return frames.isEmpty() ? null : frames.toArray(new BufferedImage[0]);
     }
 
+    private BufferedImage[] ensureScaledFrames(BufferedImage[] frames, int size) {
+        return ensureScaledFrames(frames, size, size);
+    }
+
+    private BufferedImage[] ensureScaledFrames(BufferedImage[] frames, int width, int height) {
+        if (frames == null) {
+            return null;
+        }
+        if (frames.length == 0) {
+            return new BufferedImage[0];
+        }
+        int targetWidth = Math.max(1, width);
+        int targetHeight = Math.max(1, height);
+        BufferedImage[] scaled = new BufferedImage[frames.length];
+        for (int i = 0; i < frames.length; i++) {
+            BufferedImage frame = frames[i];
+            if (frame == null) {
+                scaled[i] = null;
+                continue;
+            }
+            scaled[i] = HiDpiScaler.scale(frame, targetWidth, targetHeight);
+        }
+        return scaled;
+    }
+
     private BufferedImage[] fallbackIdleFrames(Color base, Color outline) {
         BufferedImage[] frames = new BufferedImage[4];
         for (int i = 0; i < frames.length; i++) {
@@ -455,6 +579,109 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             frames[i] = img;
         }
         return frames;
+    }
+
+    private void loadWeaponTextures() {
+        if (weaponTextures == null) {
+            weaponTextures = new EnumMap<>(WeaponType.class);
+        }
+        if (scaledWeaponCache == null) {
+            scaledWeaponCache = new HashMap<>();
+        } else {
+            scaledWeaponCache.clear();
+        }
+        if (scaledArrowCache == null) {
+            scaledArrowCache = new HashMap<>();
+        } else {
+            scaledArrowCache.clear();
+        }
+        weaponTextures.clear();
+        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true);
+        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true);
+        putWeaponTexture(WeaponType.BOW, "resources/Miscellanious/weapon_bow.png", true);
+        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true);
+        putWeaponTexture(WeaponType.CLAWS, "resources/Miscellanious/weapon_knife.png", true);
+        arrowTexture = rotateHorizontal(loadSpriteImage("resources/Miscellanious/weapon_arrow.png"));
+    }
+
+    private void putWeaponTexture(WeaponType type, String resource, boolean rotateHorizontal) {
+        if (type == null || resource == null) {
+            return;
+        }
+        BufferedImage img = loadSpriteImage(resource);
+        if (img == null) {
+            return;
+        }
+        BufferedImage prepared = rotateHorizontal ? rotateHorizontal(img) : img;
+        weaponTextures.put(type, prepared);
+    }
+
+    private BufferedImage loadSpriteImage(String resource) {
+        if (resource == null || resource.isBlank()) {
+            return null;
+        }
+        try (InputStream in = ResourceLoader.open(resource)) {
+            if (in == null) {
+                return null;
+            }
+            return ImageIO.read(in);
+        } catch (IOException ex) {
+            System.err.println("Failed to load sprite image: " + resource + " -> " + ex.getMessage());
+            return null;
+        }
+    }
+
+    private BufferedImage rotateHorizontal(BufferedImage img) {
+        if (img == null) {
+            return null;
+        }
+        int w = img.getWidth();
+        int h = img.getHeight();
+        if (w <= 0 || h <= 0) {
+            return img;
+        }
+        BufferedImage rotated = new BufferedImage(h, w, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = rotated.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.translate(h / 2.0, w / 2.0);
+            g.rotate(-Math.PI / 2.0);
+            g.translate(-w / 2.0, -h / 2.0);
+            g.drawImage(img, 0, 0, null);
+        } finally {
+            g.dispose();
+        }
+        return rotated;
+    }
+
+    private BufferedImage[] loadEnemyAnimation(EnemyType type) {
+        String prefix = switch (type) {
+            case ZOMBIE -> "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
+            case IMP -> ENEMY_IDLE_PREFIX;
+            case KNIGHT -> "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
+            case OGRE -> "resources/sprites/Ogre/ogre_idle_anim_f";
+            case PUMPKIN -> "resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f";
+            case SKELETON -> "resources/sprites/Skeleton/skelet_idle_anim_f";
+            case WIZARD -> "resources/sprites/Wizard/wizzard_m_idle_anim_f";
+        };
+        BufferedImage[] frames = loadSpriteSequence(prefix, 0, 3);
+        if (frames == null || frames.length == 0) {
+            Color[] palette = enemyFallbackPalette(type);
+            frames = fallbackIdleFrames(palette[0], palette[1]);
+        }
+        return frames;
+    }
+
+    private Color[] enemyFallbackPalette(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> new Color[]{new Color(126, 186, 132), new Color(24, 60, 32)};
+            case IMP -> new Color[]{new Color(198, 72, 72), new Color(38, 20, 20)};
+            case KNIGHT -> new Color[]{new Color(180, 180, 200), new Color(68, 70, 88)};
+            case OGRE -> new Color[]{new Color(150, 104, 44), new Color(66, 34, 10)};
+            case PUMPKIN -> new Color[]{new Color(224, 132, 40), new Color(90, 42, 8)};
+            case SKELETON -> new Color[]{new Color(230, 230, 230), new Color(76, 86, 106)};
+            case WIZARD -> new Color[]{new Color(120, 90, 200), new Color(40, 28, 70)};
+        };
     }
 
     private BufferedImage createProjectileTexture(Color core, Color mid, Color edge) {
@@ -489,6 +716,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (bullet == null || !bullet.alive) {
             return;
         }
+        if (bullet.kind == ProjectileKind.ARROW) {
+            drawArrowProjectile(g, bullet);
+            return;
+        }
         int diameter = Math.max(4, bullet.r * 2);
         int drawX = (int) Math.round(bullet.x - diameter / 2.0);
         int drawY = (int) Math.round(bullet.y - diameter / 2.0);
@@ -505,6 +736,47 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
+    private void drawArrowProjectile(Graphics2D g, Bullet bullet) {
+        AffineTransform oldTransform = g.getTransform();
+        Stroke oldStroke = g.getStroke();
+        Color oldColor = g.getColor();
+        g.translate(bullet.x, bullet.y);
+        double angle = Math.atan2(bullet.vy, bullet.vx);
+        g.rotate(angle);
+        BufferedImage sprite = scaledArrowSprite(Math.max(18, bullet.r * 4));
+        if (sprite != null) {
+            g.drawImage(sprite, -sprite.getWidth() / 2, -sprite.getHeight() / 2, null);
+            if (bullet.tint != null) {
+                java.awt.Composite oldComposite = g.getComposite();
+                g.setComposite(AlphaComposite.SrcAtop.derive(0.45f));
+                g.setColor(bullet.tint);
+                g.fillRect(-sprite.getWidth() / 2, -sprite.getHeight() / 2, sprite.getWidth(), sprite.getHeight());
+                g.setComposite(oldComposite);
+            }
+        } else {
+            int length = Math.max(18, bullet.r * 4);
+            int shaftWidth = Math.max(2, bullet.r / 2);
+            Color shaft = bullet.tint != null ? new Color(Math.max(0, bullet.tint.getRed() - 30),
+                    Math.max(0, bullet.tint.getGreen() - 30),
+                    Math.max(0, bullet.tint.getBlue() - 30),
+                    bullet.tint.getAlpha()) : new Color(200, 200, 200);
+            Color head = bullet.tint != null ? bullet.tint : new Color(255, 255, 255);
+            g.setStroke(new BasicStroke(shaftWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.setColor(shaft);
+            g.drawLine(-length / 2, 0, length / 2 - 4, 0);
+            Path2D.Double arrowHead = new Path2D.Double();
+            arrowHead.moveTo(length / 2, 0);
+            arrowHead.lineTo(length / 2 - 6, -4 - shaftWidth / 2.0);
+            arrowHead.lineTo(length / 2 - 6, 4 + shaftWidth / 2.0);
+            arrowHead.closePath();
+            g.setColor(head);
+            g.fill(arrowHead);
+        }
+        g.setColor(oldColor);
+        g.setStroke(oldStroke);
+        g.setTransform(oldTransform);
+    }
+
     // ======= Room creation / persistence =======
 
     /** Get existing room at pos or create a new one with 1–3 doors. Guarantees an entrance if required. */
@@ -514,7 +786,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             r = generateNewRoom(mustHaveEntrance);
             configureLocksForNewRoom(pos, r, mustHaveEntrance);
             world.put(new Point(pos), r); // store a copy of key to avoid mutation issues
-            spawnEnemiesIfNeeded(pos, r);
+            ensureRoomTheme(r);
+            normalizeEnemyState(r);
             return r;
         }
         // Ensure the entrance exists if we’re entering from a new side later
@@ -555,14 +828,29 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         for (EnemySpawn spawn : r.enemySpawns) {
             if (spawn.defeated) continue;
-            Enemy e = instantiateEnemyFromSpawn(spawn);
+            RoomEnemy e = instantiateEnemyFromSpawn(spawn);
             r.enemies.add(e);
         }
     }
 
+    private static final EnumSet<EnemyType> MELEE_ENEMIES = EnumSet.of(
+            EnemyType.ZOMBIE,
+            EnemyType.KNIGHT,
+            EnemyType.OGRE
+    );
+    private static final EnumSet<EnemyType> RANGED_ENEMIES = EnumSet.of(
+            EnemyType.IMP,
+            EnemyType.PUMPKIN,
+            EnemyType.SKELETON,
+            EnemyType.WIZARD
+    );
+
     private void initializeEnemySpawns(Room r) {
         if (r == null || r.spawnsPrepared) return;
-        int count = 6 + rng.nextInt(5);
+        int base = 2 + Math.min(roomsVisited / 5, 2); // 2..4 based on progress
+        int variance = Math.min(roomsVisited / 6, 2);
+        int count = base + rng.nextInt(variance + 1);
+        count = Math.max(2, Math.min(5, count));
         int attempts = 0;
         while (r.enemySpawns.size() < count && attempts++ < count * 40) {
             int tx = 2 + rng.nextInt(COLS - 4);
@@ -579,7 +867,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             EnemySpawn spawn = new EnemySpawn();
             spawn.x = px;
             spawn.y = py;
-            spawn.type = chooseEnemyType(r.enemySpawns.size());
+            spawn.type = chooseEnemyTypeForRoom(r);
             r.enemySpawns.add(spawn);
         }
         r.spawnsPrepared = true;
@@ -595,6 +883,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (room.wallThemeSeed == 0) {
             room.wallThemeSeed = secureRandom.nextInt(10_000);
         }
+        boolean paletteUnassigned = room.paletteIndex < 0 || room.paletteIndex >= ROOM_PALETTES.length;
+        if (!paletteUnassigned && room.accentSeed == 0) {
+            paletteUnassigned = true;
+        }
+        if (room.accentSeed == 0) {
+            room.accentSeed = secureRandom.nextInt(10_000);
+        }
+        if (paletteUnassigned) {
+            room.paletteIndex = Math.floorMod(room.floorThemeSeed + room.wallThemeSeed, ROOM_PALETTES.length);
+        }
     }
 
     private void normalizeEnemyState(Room room) {
@@ -609,7 +907,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
         }
         if (room.enemies != null) {
-            for (Enemy enemy : room.enemies) {
+            for (RoomEnemy enemy : room.enemies) {
                 if (enemy == null) {
                     continue;
                 }
@@ -623,76 +921,205 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     enemy.health = Math.max(1, enemy.health <= 0 ? enemy.maxHealth : Math.min(enemy.maxHealth, enemy.health));
                     enemy.damageBuffer = Math.max(0.0, enemy.damageBuffer);
                 }
+                if (enemy.weapon == null) {
+                    enemy.weapon = weaponFor(enemy.type);
+                }
+                if (!Double.isFinite(enemy.weaponAngle)) {
+                    enemy.weaponAngle = 0.0;
+                }
+                if (!Double.isFinite(enemy.facingAngle)) {
+                    enemy.facingAngle = 0.0;
+                }
+                enemy.attackAnimDuration = Math.max(0, enemy.attackAnimDuration);
+                enemy.attackAnimTicks = Math.max(0, Math.min(enemy.attackAnimTicks, enemy.attackAnimDuration));
+                enemy.bowDrawTicks = Math.max(0, enemy.bowDrawTicks);
             }
         }
     }
 
-    private Enemy instantiateEnemyFromSpawn(EnemySpawn spawn) {
-        Enemy e = new Enemy();
+    private RoomEnemy instantiateEnemyFromSpawn(EnemySpawn spawn) {
+        RoomEnemy e = new RoomEnemy();
         e.x = spawn.x;
         e.y = spawn.y;
         e.cd = rng.nextInt(45);
         e.spawn = spawn;
         e.type = spawn.type == null ? EnemyType.ZOMBIE : spawn.type;
+        e.weaponAngle = 0.0;
+        e.facingAngle = 0.0;
+        e.attackAnimTicks = 0;
+        e.attackAnimDuration = 0;
+        e.bowDrawTicks = 0;
         applyEnemyDefaults(e);
         return e;
     }
 
-    private void applyEnemyDefaults(Enemy enemy) {
+    private int defaultEnemySize(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> (int) (TILE * 0.68);
+            case IMP -> (int) (TILE * 0.6);
+            case KNIGHT -> (int) (TILE * 0.7);
+            case OGRE -> (int) (TILE * 0.82);
+            case PUMPKIN -> (int) (TILE * 0.6);
+            case SKELETON -> (int) (TILE * 0.62);
+            case WIZARD -> (int) (TILE * 0.7);
+        };
+    }
+
+    private void applyEnemyDefaults(RoomEnemy enemy) {
+        enemy.size = defaultEnemySize(enemy.type);
         switch (enemy.type) {
             case ZOMBIE -> {
-                enemy.size = (int) (TILE * 0.68);
                 enemy.maxHealth = 3;
             }
             case IMP -> {
-                enemy.size = (int) (TILE * 0.6);
                 enemy.maxHealth = 2;
             }
             case KNIGHT -> {
-                enemy.size = (int) (TILE * 0.7);
                 enemy.maxHealth = 6;
                 enemy.braceTicks = 0;
             }
             case OGRE -> {
-                enemy.size = (int) (TILE * 0.82);
                 enemy.maxHealth = 7;
             }
             case PUMPKIN -> {
-                enemy.size = (int) (TILE * 0.6);
                 enemy.maxHealth = 3;
             }
             case SKELETON -> {
-                enemy.size = (int) (TILE * 0.62);
                 enemy.maxHealth = 2;
             }
             case WIZARD -> {
-                enemy.size = (int) (TILE * 0.7);
                 enemy.maxHealth = 4;
             }
         }
         enemy.health = enemy.maxHealth;
         enemy.damageBuffer = 0.0;
         enemy.patternIndex = rng.nextInt(3);
+        enemy.weapon = weaponFor(enemy.type);
+        enemy.attackAnimTicks = 0;
+        enemy.attackAnimDuration = 0;
+        enemy.bowDrawTicks = 0;
+        enemy.weaponAngle = 0.0;
+        enemy.facingAngle = 0.0;
     }
 
-    private EnemyType chooseEnemyType(int index) {
-        EnemyType[] bag = {
-                EnemyType.ZOMBIE,
-                EnemyType.IMP,
-                EnemyType.KNIGHT,
-                EnemyType.OGRE,
-                EnemyType.PUMPKIN,
-                EnemyType.SKELETON,
-                EnemyType.WIZARD,
-                EnemyType.ZOMBIE,
-                EnemyType.SKELETON,
-                EnemyType.IMP,
-                EnemyType.PUMPKIN
-        };
-        if (index < bag.length) {
-            return bag[index];
+    private EnemyType chooseEnemyTypeForRoom(Room room) {
+        if (room == null) {
+            return EnemyType.ZOMBIE;
         }
-        return bag[rng.nextInt(bag.length)];
+
+        EnumMap<EnemyType, Integer> counts = new EnumMap<>(EnemyType.class);
+        for (EnemySpawn spawn : room.enemySpawns) {
+            EnemyType type = spawn == null || spawn.type == null ? EnemyType.ZOMBIE : spawn.type;
+            counts.merge(type, 1, Integer::sum);
+        }
+
+        List<EnemyType> pool = buildEnemyPool(counts);
+        if (pool.isEmpty()) {
+            return EnemyType.ZOMBIE;
+        }
+
+        boolean hasMelee = counts.keySet().stream().anyMatch(MELEE_ENEMIES::contains);
+        boolean hasRanged = counts.keySet().stream().anyMatch(RANGED_ENEMIES::contains);
+        if (!hasMelee || !hasRanged) {
+            List<EnemyType> forced = new ArrayList<>();
+            for (EnemyType type : pool) {
+                if (!hasMelee && MELEE_ENEMIES.contains(type)) {
+                    forced.add(type);
+                } else if (!hasRanged && RANGED_ENEMIES.contains(type)) {
+                    forced.add(type);
+                }
+            }
+            if (!forced.isEmpty()) {
+                pool = forced;
+            }
+        }
+
+        EnemyType last = room.enemySpawns.isEmpty() ? null : room.enemySpawns.get(room.enemySpawns.size() - 1).type;
+        if (last != null) {
+            List<EnemyType> nonRepeat = new ArrayList<>();
+            for (EnemyType type : pool) {
+                if (type != last) {
+                    nonRepeat.add(type);
+                }
+            }
+            if (!nonRepeat.isEmpty()) {
+                pool = nonRepeat;
+            }
+        }
+
+        return pool.get(rng.nextInt(pool.size()));
+    }
+
+    private List<EnemyType> buildEnemyPool(Map<EnemyType, Integer> counts) {
+        List<EnemyType> pool = new ArrayList<>();
+        for (EnemyType type : unlockedEnemyTypes()) {
+            int limit = perRoomLimit(type);
+            int current = counts.getOrDefault(type, 0);
+            if (current >= limit) {
+                continue;
+            }
+            int weight = enemySpawnWeight(type);
+            for (int i = 0; i < weight; i++) {
+                pool.add(type);
+            }
+        }
+        return pool;
+    }
+
+    private List<EnemyType> unlockedEnemyTypes() {
+        List<EnemyType> types = new ArrayList<>();
+        types.add(EnemyType.ZOMBIE);
+        if (roomsVisited >= 1) {
+            types.add(EnemyType.IMP);
+        }
+        if (roomsVisited >= 2) {
+            types.add(EnemyType.SKELETON);
+        }
+        if (roomsVisited >= 3) {
+            types.add(EnemyType.PUMPKIN);
+        }
+        if (roomsVisited >= 4) {
+            types.add(EnemyType.KNIGHT);
+        }
+        if (roomsVisited >= 5) {
+            types.add(EnemyType.WIZARD);
+        }
+        if (roomsVisited >= 6) {
+            types.add(EnemyType.OGRE);
+        }
+        return types;
+    }
+
+    private int perRoomLimit(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> 2 + roomsVisited / 10;
+            case IMP, SKELETON, PUMPKIN -> 2;
+            case WIZARD -> roomsVisited >= 8 ? 2 : 1;
+            case KNIGHT -> roomsVisited >= 7 ? 2 : 1;
+            case OGRE -> 1 + roomsVisited / 12;
+        };
+    }
+
+    private int enemySpawnWeight(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> 3;
+            case IMP -> 2;
+            case SKELETON -> roomsVisited >= 3 ? 2 : 1;
+            case PUMPKIN -> roomsVisited >= 4 ? 2 : 1;
+            case KNIGHT -> roomsVisited >= 6 ? 2 : 1;
+            case WIZARD -> roomsVisited >= 7 ? 2 : 1;
+            case OGRE -> roomsVisited >= 8 ? 2 : 1;
+        };
+    }
+
+    private WeaponType weaponFor(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE, KNIGHT -> WeaponType.SWORD;
+            case OGRE -> WeaponType.HAMMER;
+            case PUMPKIN, SKELETON -> WeaponType.BOW;
+            case WIZARD -> WeaponType.STAFF;
+            case IMP -> WeaponType.CLAWS;
+        };
     }
 
     private boolean isBossRoom(Point pos) {
@@ -720,7 +1147,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int pcx = player.x + player.width/2;
         int pcy = player.y + player.height/2;
 
-        for (Enemy e : room.enemies) {
+        for (RoomEnemy e : room.enemies) {
             if (!e.alive) {
                 continue;
             }
@@ -738,7 +1165,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         explosions.removeIf(ex -> ex.age >= ex.life);
     }
 
-    private void updateEnemyBehavior(Enemy enemy, int pcx, int pcy) {
+    private void updateEnemyBehavior(RoomEnemy enemy, int pcx, int pcy) {
         if (enemy == null || !enemy.alive) {
             return;
         }
@@ -747,6 +1174,27 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         if (enemy.braceTicks > 0) {
             enemy.braceTicks--;
+        }
+
+        boolean preppingHeavy = enemy.type == EnemyType.OGRE && enemy.windup > 0;
+        if (!preppingHeavy) {
+            if (enemy.attackAnimTicks > 0) {
+                enemy.attackAnimTicks--;
+            } else {
+                enemy.attackAnimTicks = 0;
+            }
+        }
+        if (enemy.bowDrawTicks > 0) {
+            enemy.bowDrawTicks--;
+        }
+
+        double angleToPlayer = Math.atan2(pcy - enemy.y, pcx - enemy.x);
+        if (!Double.isFinite(angleToPlayer)) {
+            angleToPlayer = 0.0;
+        }
+        enemy.facingAngle = angleToPlayer;
+        if (enemy.attackAnimTicks <= 0 && !preppingHeavy) {
+            enemy.weaponAngle = angleToPlayer;
         }
 
         double distance = Math.hypot(pcx - enemy.x, pcy - enemy.y);
@@ -781,6 +1229,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
             case OGRE -> {
                 if (enemy.windup > 0) {
+                    enemy.weaponAngle = angleToPlayer;
+                    enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, enemy.windup);
+                    enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, enemy.windup);
                     enemy.windup--;
                     if (enemy.windup == 0) {
                         if (player != null && intersectsCircleRect(enemy.x, enemy.y, TILE * 1.2, player)) {
@@ -795,6 +1246,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 if (distance < TILE * 1.3 && enemy.cd <= 0) {
                     enemy.windup = 18;
                     enemy.cd = 80;
+                    enemy.weaponAngle = angleToPlayer;
+                    enemy.attackAnimDuration = enemy.windup;
+                    enemy.attackAnimTicks = enemy.windup;
                 }
             }
             case PUMPKIN -> {
@@ -808,14 +1262,28 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     strafeEnemy(enemy, pcx, pcy, 0.58, (enemy.patternIndex & 1) == 1);
                 }
                 if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    startBowDraw(enemy, angleToPlayer);
                     spawnEnemyProjectile(enemy, pcx, pcy, 2.8, 1.1, 7, false,
                             new Color(255, 138, 56), true, 40, 32);
                     enemy.cd = 95 + rng.nextInt(30);
                 }
             }
             case SKELETON -> {
-                moveEnemyToward(enemy, pcx, pcy, 1.15);
-                attemptMeleeStrike(enemy, enemy.size * 0.6, 1.0, 40);
+                double minRange = TILE * 3.2;
+                double maxRange = TILE * 6.0;
+                if (distance < minRange) {
+                    moveEnemyAway(enemy, pcx, pcy, 1.05);
+                } else if (distance > maxRange) {
+                    moveEnemyToward(enemy, pcx, pcy, 0.82);
+                } else {
+                    strafeEnemy(enemy, pcx, pcy, 0.72, (enemy.patternIndex & 1) == 0);
+                }
+                if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    startBowDraw(enemy, angleToPlayer);
+                    spawnEnemyProjectile(enemy, pcx, pcy, 5.2, 1.2, 6, false,
+                            new Color(220, 220, 220), false, 0, 0);
+                    enemy.cd = 55 + rng.nextInt(30);
+                }
             }
             case WIZARD -> {
                 double minRange = TILE * 4.5;
@@ -828,6 +1296,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     strafeEnemy(enemy, pcx, pcy, 0.64, (enemy.patternIndex & 1) == 0);
                 }
                 if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    enemy.weaponAngle = angleToPlayer;
                     castWizardPattern(enemy, pcx, pcy);
                     enemy.cd = 80 + rng.nextInt(40);
                 }
@@ -900,7 +1369,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     continue;
                 }
             }
-            for (Enemy enemy : room.enemies) {
+            for (RoomEnemy enemy : room.enemies) {
                 if (!enemy.alive || !b.alive) {
                     continue;
                 }
@@ -935,14 +1404,49 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 new Color(200, 240, 255), new Color(150, 210, 255)));
     }
 
-    private void attemptMeleeStrike(Enemy enemy, double range, double damage, int cooldown) {
+    private void attemptMeleeStrike(RoomEnemy enemy, double range, double damage, int cooldown) {
         if (enemy.cd > 0) {
             return;
         }
         if (player != null && intersectsCircleRect(enemy.x, enemy.y, range, player)) {
             applyPlayerDamage(damage);
             enemy.cd = cooldown;
+            triggerMeleeSwing(enemy);
         }
+    }
+
+    private void triggerMeleeSwing(RoomEnemy enemy) {
+        if (enemy == null) {
+            return;
+        }
+        if (enemy.weapon != WeaponType.SWORD && enemy.weapon != WeaponType.HAMMER) {
+            return;
+        }
+        int duration = enemy.weapon == WeaponType.HAMMER ? 26 : 16;
+        enemy.attackAnimDuration = duration;
+        enemy.attackAnimTicks = duration;
+        enemy.weaponAngle = enemy.facingAngle;
+    }
+
+    private void startBowDraw(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
     }
 
     private void applyPlayerDamage(double damage) {
@@ -965,7 +1469,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void applyDamageToEnemy(Enemy enemy, double damage) {
+    private void applyDamageToEnemy(RoomEnemy enemy, double damage) {
         if (enemy == null || !enemy.alive || damage <= 0) {
             return;
         }
@@ -984,7 +1488,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void moveEnemyToward(Enemy enemy, int targetX, int targetY, double speed) {
+    private void moveEnemyToward(RoomEnemy enemy, int targetX, int targetY, double speed) {
         double dx = targetX - enemy.x;
         double dy = targetY - enemy.y;
         double len = Math.hypot(dx, dy);
@@ -1009,11 +1513,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void moveEnemyAway(Enemy enemy, int targetX, int targetY, double speed) {
+    private void moveEnemyAway(RoomEnemy enemy, int targetX, int targetY, double speed) {
         moveEnemyToward(enemy, targetX, targetY, -speed);
     }
 
-    private void strafeEnemy(Enemy enemy, int targetX, int targetY, double speed, boolean clockwise) {
+    private void strafeEnemy(RoomEnemy enemy, int targetX, int targetY, double speed, boolean clockwise) {
         double dx = targetX - enemy.x;
         double dy = targetY - enemy.y;
         double len = Math.hypot(dx, dy);
@@ -1062,8 +1566,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return true;
     }
 
-    private void castWizardPattern(Enemy enemy, int pcx, int pcy) {
+    private void castWizardPattern(RoomEnemy enemy, int pcx, int pcy) {
         double baseAngle = Math.atan2(pcy - enemy.y, pcx - enemy.x);
+        triggerStaffCast(enemy, baseAngle);
         int pattern = enemy.patternIndex % 3;
         switch (pattern) {
             case 0 -> {
@@ -1083,7 +1588,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.patternIndex = (enemy.patternIndex + 1) % 6;
     }
 
-    private void spawnEnemyProjectile(Enemy shooter, double targetX, double targetY, double speed,
+    private void spawnEnemyProjectile(RoomEnemy shooter, double targetX, double targetY, double speed,
                                       double damage, int radius, boolean useTexture, Color tint,
                                       boolean explosive, int explosionRadius, int explosionLife) {
         if (shooter == null) {
@@ -1093,7 +1598,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         spawnEnemyProjectileAngle(shooter, angle, speed, damage, radius, useTexture, tint, explosive, explosionRadius, explosionLife);
     }
 
-    private void spawnEnemyProjectileAngle(Enemy shooter, double angle, double speed, double damage,
+    private void spawnEnemyProjectileAngle(RoomEnemy shooter, double angle, double speed, double damage,
                                            int radius, boolean useTexture, Color tint,
                                            boolean explosive, int explosionRadius, int explosionLife) {
         Bullet b = new Bullet();
@@ -1109,10 +1614,21 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         b.explosive = explosive;
         b.explosionRadius = explosionRadius;
         b.explosionLife = explosionLife;
+        if (shooter.weapon == WeaponType.BOW) {
+            b.kind = ProjectileKind.ARROW;
+            b.useTexture = false;
+            if (b.tint == null) {
+                b.tint = shooter.type == EnemyType.PUMPKIN
+                        ? new Color(255, 190, 120)
+                        : new Color(220, 220, 220);
+            }
+        } else {
+            b.kind = ProjectileKind.ORB;
+        }
         bullets.add(b);
     }
 
-    private void eliminateEnemy(Room r, Enemy enemy) {
+    private void eliminateEnemy(Room r, RoomEnemy enemy) {
         if (enemy == null || !enemy.alive) return;
         enemy.alive = false;
         if (enemy.spawn != null) {
@@ -1239,7 +1755,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void initializeBossPool() {
         bossPool.clear();
-        Collections.addAll(bossPool, BossBattlePanel.BossKind.values());
+        for (BossBattlePanel.BossKind kind : BossBattlePanel.BossKind.values()) {
+            if (BossBattlePanel.hasDedicatedAssets(kind)) {
+                bossPool.add(kind);
+            }
+        }
+        if (bossPool.isEmpty()) {
+            Collections.addAll(bossPool, BossBattlePanel.BossKind.values());
+        }
         Collections.shuffle(bossPool, secureRandom);
     }
 
@@ -1363,6 +1886,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         Room r = new Room();
         r.floorThemeSeed = secureRandom.nextInt(10_000);
         r.wallThemeSeed = secureRandom.nextInt(10_000);
+        r.accentSeed = secureRandom.nextInt(10_000);
+        if (ROOM_PALETTES.length > 0) {
+            r.paletteIndex = secureRandom.nextInt(ROOM_PALETTES.length);
+        }
 
         // Floor fill and border walls
         for (int x = 0; x < COLS; x++)
@@ -1401,8 +1928,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                         r.g[bx + dx][by + dy] = T.WALL;
         }
         // Revalidate enemies: push out of walls if necessary
-        List<Enemy> kept = new ArrayList<>();
-        for (Enemy e : r.enemies) {
+        List<RoomEnemy> kept = new ArrayList<>();
+        for (RoomEnemy e : r.enemies) {
             if (isRectFree(r, e.x, e.y, e.size/2)) { kept.add(e); continue; }
             boolean placed = false;
             // Try spiral search around current tile
@@ -1578,7 +2105,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (!blocked) player = next;
     }
 
-    private void attemptEnemyMove(Enemy e, int dx, int dy) {
+    private void attemptEnemyMove(RoomEnemy e, int dx, int dy) {
         if (dx == 0 && dy == 0) return;
         int nx = e.x + dx;
         int ny = e.y + dy;
@@ -1680,6 +2207,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
         }
 
+        spawnEnemiesIfNeeded(worldPos, room);
+
         checkForBossEncounter();
     }
 
@@ -1751,6 +2280,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void drawWorld(Graphics2D gg) {
         ensureRoomTheme(room);
+        RoomPalette palette = paletteFor(room);
         for (int x = 0; x < COLS; x++) {
             for (int y = 0; y < ROWS; y++) {
                 int px = x * TILE, py = y * TILE;
@@ -1761,14 +2291,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     int fIdx = Math.floorMod(room.floorThemeSeed + x * 17 + y * 31, fCount);
                     int wIdx = Math.floorMod(room.wallThemeSeed + x * 13 + y * 19, wCount);
                     switch (t) {
-                        case FLOOR -> gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
-                        case WALL  -> gg.drawImage(textures.wallVariant(wIdx),  px, py, TILE, TILE, null);
+                        case FLOOR -> drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, room, x, y);
+                        case WALL  -> drawWallTile(gg, textures.wallVariant(wIdx),  px, py, palette, room, x, y);
                         case DOOR  -> {
                             BufferedImage doorTile = textures.doorFloor();
                             if (doorTile != null) {
-                                gg.drawImage(doorTile, px, py, TILE, TILE, null);
+                                drawFloorTile(gg, doorTile, px, py, palette, room, x, y);
                             } else {
-                                gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
+                                drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, room, x, y);
                             }
                             gg.setColor(new Color(220, 172, 60));
                             if (x == 0 || x == COLS - 1)
@@ -1796,20 +2326,43 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.drawOval(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
         }
 
-        for (Enemy e : room.enemies) {
+        for (RoomEnemy e : room.enemies) {
             if (!e.alive) continue;
-            if (enemyIdleFrames != null && enemyIdleFrames.length > 0) {
-                int idx = (animTick / 10) % enemyIdleFrames.length;
-                gg.drawImage(enemyIdleFrames[idx], e.x - e.size/2, e.y - e.size/2, e.size, e.size, null);
-            } else {
-                gg.setColor(new Color(200,60,60));
+            BufferedImage[] frames = enemyIdleAnimations.get(e.type);
+            if (frames == null || frames.length == 0) {
+                frames = defaultEnemyFrames;
+            }
+            if (frames != null && frames.length > 0) {
+                int idx = (animTick / 10) % frames.length;
+                BufferedImage frame = frames[idx];
+                if (frame != null) {
+                    int drawW = frame.getWidth();
+                    int drawH = frame.getHeight();
+                    gg.drawImage(frame, e.x - drawW / 2, e.y - drawH / 2, null);
+                    drawEnemyWeapon(gg, e);
+                    continue;
+                }
+            }
+            {
+                Color[] paletteFallback = enemyFallbackPalette(e.type);
+                gg.setColor(paletteFallback[0]);
                 gg.fillOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
+                gg.setColor(paletteFallback[1]);
+                gg.setStroke(new BasicStroke(2f));
+                gg.drawOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
+                drawEnemyWeapon(gg, e);
             }
         }
 
         if (playerIdleFrames != null && playerIdleFrames.length > 0){
             int idx = (animTick / 10) % playerIdleFrames.length;
-            gg.drawImage(playerIdleFrames[idx], player.x, player.y, player.width, player.height, null);
+            BufferedImage frame = playerIdleFrames[idx];
+            if (frame != null) {
+                gg.drawImage(frame, player.x, player.y, null);
+            } else {
+                gg.setColor(new Color(255,214,102));
+                gg.fillOval(player.x,player.y,player.width,player.height);
+            }
         } else {
             gg.setColor(new Color(255,214,102));
             gg.fillOval(player.x,player.y,player.width,player.height);
@@ -1862,6 +2415,408 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.drawOval((int)ex.x - r, (int)ex.y - r, r*2, r*2);
             gg.setComposite(AlphaComposite.SrcOver);
         }
+    }
+
+    private RoomPalette paletteFor(Room room) {
+        if (room == null || ROOM_PALETTES.length == 0) {
+            return null;
+        }
+        int index = Math.floorMod(room.paletteIndex, ROOM_PALETTES.length);
+        return ROOM_PALETTES[index];
+    }
+
+    private void drawFloorTile(Graphics2D gg, BufferedImage texture, int px, int py, RoomPalette palette, Room room, int tx, int ty) {
+        if (texture != null) {
+            gg.drawImage(texture, px, py, TILE, TILE, null);
+        } else {
+            gg.setColor(new Color(24, 60, 78));
+            gg.fillRect(px, py, TILE, TILE);
+        }
+        if (palette == null) {
+            return;
+        }
+        java.awt.Composite original = gg.getComposite();
+        gg.setComposite(AlphaComposite.SrcOver.derive(palette.floorAlpha));
+        gg.setColor(palette.floorTint);
+        gg.fillRect(px, py, TILE, TILE);
+        gg.setComposite(original);
+
+        if (palette.floorAccent != null) {
+            gg.setComposite(AlphaComposite.SrcOver.derive(0.18f));
+            gg.setColor(palette.floorAccent);
+            if (Math.floorMod(accentHash(room, tx, ty, 1), 5) == 0) {
+                gg.fillRect(px, py + TILE - 3, TILE, 3);
+            }
+            if (Math.floorMod(accentHash(room, tx, ty, 2), 7) == 0) {
+                gg.fillRect(px + TILE - 3, py, 3, TILE);
+            }
+            gg.setComposite(original);
+        }
+        gg.setColor(new Color(0, 0, 0, 35));
+        gg.drawRect(px, py, TILE, TILE);
+    }
+
+    private void drawWallTile(Graphics2D gg, BufferedImage texture, int px, int py, RoomPalette palette, Room room, int tx, int ty) {
+        if (texture != null) {
+            gg.drawImage(texture, px, py, TILE, TILE, null);
+        } else {
+            gg.setColor(new Color(38, 82, 96));
+            gg.fillRect(px, py, TILE, TILE);
+        }
+        if (palette == null) {
+            return;
+        }
+        java.awt.Composite original = gg.getComposite();
+        gg.setComposite(AlphaComposite.SrcOver.derive(palette.wallAlpha));
+        gg.setColor(palette.wallTint);
+        gg.fillRect(px, py, TILE, TILE);
+        gg.setComposite(original);
+
+        gg.setComposite(AlphaComposite.SrcOver.derive(0.55f));
+        gg.setColor(palette.wallHighlight);
+        gg.fillRect(px, py, TILE, 3);
+        gg.setComposite(AlphaComposite.SrcOver.derive(0.65f));
+        gg.setColor(palette.wallShadow);
+        gg.fillRect(px, py + TILE - 5, TILE, 5);
+        gg.setComposite(original);
+
+        if (Math.floorMod(accentHash(room, tx, ty, 5), 6) == 0) {
+            gg.setColor(new Color(palette.wallHighlight.getRed(), palette.wallHighlight.getGreen(), palette.wallHighlight.getBlue(), 80));
+            gg.fillRect(px, py, 4, TILE);
+        }
+    }
+
+    private int accentHash(Room room, int tx, int ty, int salt) {
+        if (room == null) {
+            return 0;
+        }
+        int seed = room.accentSeed == 0 ? 1 : room.accentSeed;
+        return seed + tx * 53 + ty * 97 + salt * 131;
+    }
+
+    private void drawEnemyWeapon(Graphics2D gg, RoomEnemy enemy) {
+        if (enemy == null || !enemy.alive) {
+            return;
+        }
+        switch (enemy.weapon) {
+            case CLAWS -> drawClaws(gg, enemy);
+            case SWORD -> drawSword(gg, enemy);
+            case HAMMER -> drawHammer(gg, enemy);
+            case BOW -> drawBow(gg, enemy);
+            case STAFF -> drawStaff(gg, enemy);
+            default -> {
+            }
+        }
+    }
+
+    private void drawClaws(Graphics2D gg, RoomEnemy enemy) {
+        double angle = computeSwingAngle(enemy, Math.toRadians(80));
+        int offset = Math.max(6, enemy.size / 2 - 6);
+        int target = Math.max((int) (enemy.size * 0.9), TILE / 2 + enemy.size / 3);
+        if (!drawWeaponSprite(gg, enemy, WeaponType.CLAWS, angle, offset, target, null)) {
+            drawClawsPrimitive(gg, enemy, angle, offset);
+        }
+    }
+
+    private double computeSwingAngle(RoomEnemy enemy, double sweepRadians) {
+        double base = enemy.weaponAngle;
+        if (!Double.isFinite(base)) {
+            base = 0.0;
+        }
+        if (enemy.attackAnimDuration <= 0) {
+            return base - sweepRadians * 0.35;
+        }
+        double progress = 1.0 - (enemy.attackAnimTicks / (double) Math.max(1, enemy.attackAnimDuration));
+        progress = Math.max(0.0, Math.min(1.0, progress));
+        return base - sweepRadians / 2.0 + progress * sweepRadians;
+    }
+
+    private void drawSword(Graphics2D gg, RoomEnemy enemy) {
+        double angle = computeSwingAngle(enemy, Math.toRadians(110));
+        int offset = Math.max(10, enemy.size / 2);
+        int target = Math.max(enemy.size + TILE / 2, (int) (enemy.size * 1.45));
+        if (!drawWeaponSprite(gg, enemy, WeaponType.SWORD, angle, offset, target, null)) {
+            drawSwordPrimitive(gg, enemy, angle, offset);
+        }
+    }
+
+    private void drawHammer(Graphics2D gg, RoomEnemy enemy) {
+        double angle = computeSwingAngle(enemy, Math.toRadians(140));
+        int offset = Math.max(8, enemy.size / 2);
+        int target = Math.max(enemy.size + TILE / 2, (int) (enemy.size * 1.6));
+        if (!drawWeaponSprite(gg, enemy, WeaponType.HAMMER, angle, offset, target, null)) {
+            drawHammerPrimitive(gg, enemy, angle, offset);
+        }
+    }
+
+    private void drawBow(Graphics2D gg, RoomEnemy enemy) {
+        double angle = enemy.weaponAngle;
+        int offset = Math.max(6, enemy.size / 2 - 4);
+        int target = Math.max(enemy.size + TILE / 3, (int) (enemy.size * 1.35));
+        if (!drawWeaponSprite(gg, enemy, WeaponType.BOW, angle, offset, target, this::drawBowOverlay)) {
+            drawBowPrimitive(gg, enemy);
+        }
+    }
+
+    private void drawStaff(Graphics2D gg, RoomEnemy enemy) {
+        double angle = enemy.weaponAngle;
+        int offset = Math.max(6, enemy.size / 2 - 4);
+        int target = Math.max(enemy.size + TILE / 2, (int) (enemy.size * 1.5));
+        if (!drawWeaponSprite(gg, enemy, WeaponType.STAFF, angle, offset, target, this::drawStaffOrb)) {
+            drawStaffPrimitive(gg, enemy, angle, offset);
+        }
+    }
+
+    private void drawClawsPrimitive(Graphics2D gg, RoomEnemy enemy, double angle, int offset) {
+        AffineTransform original = gg.getTransform();
+        gg.translate(enemy.x, enemy.y);
+        gg.rotate(angle);
+        int clawLength = Math.max(14, TILE / 2);
+        int clawWidth = Math.max(3, TILE / 10);
+        gg.setColor(new Color(210, 210, 225));
+        gg.fillRoundRect(offset, -clawWidth / 2, clawLength, clawWidth, clawWidth, clawWidth);
+        gg.setColor(new Color(150, 150, 170));
+        gg.drawRoundRect(offset, -clawWidth / 2, clawLength, clawWidth, clawWidth, clawWidth);
+        gg.setTransform(original);
+    }
+
+    private void drawSwordPrimitive(Graphics2D gg, RoomEnemy enemy, double angle, int offset) {
+        int bladeLength = (int) (TILE * 1.1);
+        int bladeWidth = Math.max(4, TILE / 7);
+        int guardWidth = Math.max(bladeWidth * 3, 14);
+        int gripLength = Math.max(8, TILE / 3);
+
+        AffineTransform original = gg.getTransform();
+        gg.translate(enemy.x, enemy.y);
+        gg.rotate(angle);
+        gg.setColor(new Color(200, 210, 230));
+        gg.fillRoundRect(offset, -bladeWidth / 2, bladeLength, bladeWidth, bladeWidth, bladeWidth);
+        gg.setColor(new Color(160, 170, 190));
+        gg.drawRoundRect(offset, -bladeWidth / 2, bladeLength, bladeWidth, bladeWidth, bladeWidth);
+        gg.setColor(new Color(170, 132, 60));
+        gg.fillRoundRect(offset - gripLength, -bladeWidth / 2, gripLength, bladeWidth, bladeWidth, bladeWidth);
+        gg.fillRoundRect(offset - bladeWidth / 2, -guardWidth / 2, guardWidth, guardWidth, bladeWidth, bladeWidth);
+        gg.setTransform(original);
+    }
+
+    private void drawHammerPrimitive(Graphics2D gg, RoomEnemy enemy, double angle, int offset) {
+        int handleLength = (int) (TILE * 1.0);
+        int handleWidth = Math.max(4, TILE / 8);
+        int headWidth = Math.max(TILE / 2, 18);
+        int headHeight = Math.max(TILE / 3, 14);
+
+        AffineTransform original = gg.getTransform();
+        gg.translate(enemy.x, enemy.y);
+        gg.rotate(angle);
+        gg.setColor(new Color(94, 62, 32));
+        gg.fillRoundRect(offset - 4, -handleWidth / 2, handleLength, handleWidth, handleWidth, handleWidth);
+        gg.setColor(new Color(60, 40, 24));
+        gg.drawRoundRect(offset - 4, -handleWidth / 2, handleLength, handleWidth, handleWidth, handleWidth);
+        gg.setColor(new Color(190, 190, 204));
+        gg.fillRoundRect(offset + handleLength - headWidth, -headHeight / 2, headWidth, headHeight, headHeight / 2, headHeight / 2);
+        gg.setColor(new Color(150, 150, 170));
+        gg.drawRoundRect(offset + handleLength - headWidth, -headHeight / 2, headWidth, headHeight, headHeight / 2, headHeight / 2);
+        gg.setTransform(original);
+    }
+
+    private void drawBowPrimitive(Graphics2D gg, RoomEnemy enemy) {
+        double angle = enemy.weaponAngle;
+        int offset = Math.max(6, enemy.size / 2 - 4);
+        int bowHeight = Math.max(TILE, enemy.size + TILE / 3);
+        int bowLength = Math.max(TILE / 2, enemy.size);
+        float drawProgress = Math.min(1f, enemy.bowDrawTicks / 12f);
+        int pull = (int) (bowLength * 0.6f * drawProgress);
+
+        AffineTransform original = gg.getTransform();
+        Stroke oldStroke = gg.getStroke();
+        gg.translate(enemy.x, enemy.y);
+        gg.rotate(angle);
+        gg.setStroke(new BasicStroke(Math.max(2f, TILE / 18f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        gg.setColor(new Color(150, 110, 60));
+        gg.drawLine(offset, -bowHeight / 2, offset, bowHeight / 2);
+        gg.setColor(new Color(210, 180, 120));
+        int stringX = offset - pull;
+        gg.drawLine(offset, -bowHeight / 2, stringX, 0);
+        gg.drawLine(offset, bowHeight / 2, stringX, 0);
+
+        if (enemy.bowDrawTicks > 0) {
+            Color shaft = enemy.type == EnemyType.PUMPKIN ? new Color(210, 150, 70) : new Color(230, 230, 230);
+            Color head = enemy.type == EnemyType.PUMPKIN ? new Color(255, 210, 130) : new Color(255, 255, 255);
+            drawArrowShape(gg, stringX, 0, bowLength, shaft, head);
+        }
+
+        gg.setStroke(oldStroke);
+        gg.setTransform(original);
+    }
+
+    private void drawBowOverlay(Graphics2D gg, BufferedImage sprite, RoomEnemy enemy) {
+        if (gg == null || sprite == null || enemy == null) {
+            return;
+        }
+        float drawProgress = Math.min(1f, enemy.bowDrawTicks / 12f);
+        int halfHeight = sprite.getHeight() / 2;
+        int pull = (int) (sprite.getWidth() * 0.45f * drawProgress);
+        Stroke oldStroke = gg.getStroke();
+        gg.setStroke(new BasicStroke(Math.max(2f, TILE / 18f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        gg.setColor(new Color(210, 180, 120));
+        gg.drawLine(-pull, -halfHeight, -pull, halfHeight);
+        gg.setStroke(oldStroke);
+
+        if (enemy.bowDrawTicks > 0) {
+            BufferedImage arrow = scaledArrowSprite(Math.max(sprite.getWidth(), sprite.getHeight()));
+            if (arrow != null) {
+                int drawX = -pull - arrow.getWidth();
+                gg.drawImage(arrow, drawX, -arrow.getHeight() / 2, null);
+            } else {
+                Color shaft = enemy.type == EnemyType.PUMPKIN ? new Color(210, 150, 70) : new Color(230, 230, 230);
+                Color head = enemy.type == EnemyType.PUMPKIN ? new Color(255, 210, 130) : new Color(255, 255, 255);
+                drawArrowShape(gg, -pull, 0, sprite.getWidth(), shaft, head);
+            }
+        }
+    }
+
+    private void drawStaffPrimitive(Graphics2D gg, RoomEnemy enemy, double angle, int offset) {
+        int staffLength = (int) (TILE * 1.05);
+        int staffWidth = Math.max(5, TILE / 10);
+        int orbRadius = Math.max(6, TILE / 4);
+        double pulse = enemy.attackAnimDuration > 0 ? 1.0 - (enemy.attackAnimTicks / (double) Math.max(1, enemy.attackAnimDuration)) : 0.25;
+        pulse = Math.max(0.2, Math.min(1.0, pulse));
+
+        AffineTransform original = gg.getTransform();
+        gg.translate(enemy.x, enemy.y);
+        gg.rotate(angle);
+        gg.setColor(new Color(80, 60, 120));
+        gg.fillRoundRect(offset - 4, -staffWidth / 2, staffLength, staffWidth, staffWidth, staffWidth);
+        int orbX = offset + staffLength - orbRadius * 2;
+        int orbY = -orbRadius;
+        java.awt.Composite oldComposite = gg.getComposite();
+        gg.setComposite(AlphaComposite.SrcOver.derive(0.85f));
+        gg.setColor(new Color(170, 150, 255));
+        gg.fillOval(orbX, orbY, orbRadius * 2, orbRadius * 2);
+        gg.setComposite(AlphaComposite.SrcOver.derive((float) (0.45 + pulse * 0.35)));
+        gg.setColor(new Color(255, 240, 255));
+        gg.fillOval(orbX + 2, orbY + 2, orbRadius * 2 - 4, orbRadius * 2 - 4);
+        gg.setComposite(oldComposite);
+        gg.setColor(new Color(120, 90, 200));
+        gg.drawOval(orbX, orbY, orbRadius * 2, orbRadius * 2);
+        gg.setTransform(original);
+    }
+
+    private void drawStaffOrb(Graphics2D gg, BufferedImage sprite, RoomEnemy enemy) {
+        if (gg == null || sprite == null || enemy == null) {
+            return;
+        }
+        int orbRadius = Math.max(6, sprite.getHeight() / 4);
+        int orbX = sprite.getWidth() - orbRadius * 2;
+        int orbY = -orbRadius;
+        double pulse = enemy.attackAnimDuration > 0 ? 1.0 - (enemy.attackAnimTicks / (double) Math.max(1, enemy.attackAnimDuration)) : 0.25;
+        pulse = Math.max(0.2, Math.min(1.0, pulse));
+        java.awt.Composite oldComposite = gg.getComposite();
+        gg.setComposite(AlphaComposite.SrcOver.derive(0.85f));
+        gg.setColor(new Color(170, 150, 255));
+        gg.fillOval(orbX, orbY, orbRadius * 2, orbRadius * 2);
+        gg.setComposite(AlphaComposite.SrcOver.derive((float) (0.45 + pulse * 0.35)));
+        gg.setColor(new Color(255, 240, 255));
+        gg.fillOval(orbX + 2, orbY + 2, orbRadius * 2 - 4, orbRadius * 2 - 4);
+        gg.setComposite(oldComposite);
+    }
+
+    private boolean drawWeaponSprite(Graphics2D gg, RoomEnemy enemy, WeaponType type,
+                                     double angle, int offset, int targetLongEdge,
+                                     WeaponOverlay overlay) {
+        BufferedImage sprite = scaledWeaponSprite(type, targetLongEdge);
+        if (sprite == null) {
+            return false;
+        }
+        AffineTransform original = gg.getTransform();
+        gg.translate(enemy.x, enemy.y);
+        gg.rotate(angle);
+        gg.translate(offset, 0);
+        gg.drawImage(sprite, 0, -sprite.getHeight() / 2, null);
+        if (overlay != null) {
+            overlay.draw(gg, sprite, enemy);
+        }
+        gg.setTransform(original);
+        return true;
+    }
+
+    private BufferedImage scaledWeaponSprite(WeaponType type, int targetLongEdge) {
+        if (weaponTextures == null || weaponTextures.isEmpty() || type == null) {
+            return null;
+        }
+        BufferedImage base = weaponTextures.get(type);
+        if (base == null) {
+            return null;
+        }
+        int baseWidth = base.getWidth();
+        int baseHeight = base.getHeight();
+        if (baseWidth <= 0 || baseHeight <= 0) {
+            return base;
+        }
+        int targetWidth = Math.max(1, targetLongEdge);
+        WeaponCacheKey cacheKey = new WeaponCacheKey(type, targetWidth);
+        if (scaledWeaponCache == null) {
+            scaledWeaponCache = new HashMap<>();
+        } else {
+            BufferedImage cached = scaledWeaponCache.get(cacheKey);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        double scale = targetWidth / (double) baseWidth;
+        int targetHeight = Math.max(1, (int) Math.round(baseHeight * scale));
+        BufferedImage scaled = HiDpiScaler.scale(base, targetWidth, targetHeight);
+        scaledWeaponCache.put(cacheKey, scaled);
+        return scaled;
+    }
+
+    private BufferedImage scaledArrowSprite(int targetLongEdge) {
+        if (arrowTexture == null) {
+            return null;
+        }
+        int baseWidth = arrowTexture.getWidth();
+        int baseHeight = arrowTexture.getHeight();
+        if (baseWidth <= 0 || baseHeight <= 0) {
+            return arrowTexture;
+        }
+        int targetWidth = Math.max(1, targetLongEdge);
+        if (scaledArrowCache == null) {
+            scaledArrowCache = new HashMap<>();
+        } else {
+            BufferedImage cached = scaledArrowCache.get(targetWidth);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        double scale = targetWidth / (double) baseWidth;
+        int targetHeight = Math.max(1, (int) Math.round(baseHeight * scale));
+        BufferedImage scaled = HiDpiScaler.scale(arrowTexture, targetWidth, targetHeight);
+        scaledArrowCache.put(targetWidth, scaled);
+        return scaled;
+    }
+
+    @FunctionalInterface
+    private interface WeaponOverlay {
+        void draw(Graphics2D g, BufferedImage sprite, RoomEnemy enemy);
+    }
+
+    private record WeaponCacheKey(WeaponType type, int targetWidth) { }
+
+    private void drawArrowShape(Graphics2D gg, int startX, int startY, int length, Color shaft, Color head) {
+        int arrowLength = Math.max(18, length);
+        int endX = startX + arrowLength;
+        Stroke old = gg.getStroke();
+        gg.setStroke(new BasicStroke(Math.max(2f, TILE / 22f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        gg.setColor(shaft);
+        gg.drawLine(startX, startY, endX, startY);
+        Path2D.Float arrowHead = new Path2D.Float();
+        arrowHead.moveTo(endX, startY);
+        arrowHead.lineTo(endX - 6, startY - 4);
+        arrowHead.lineTo(endX - 6, startY + 4);
+        arrowHead.closePath();
+        gg.setColor(head);
+        gg.fill(arrowHead);
+        gg.setStroke(old);
     }
 
     private void drawHud(Graphics2D overlay) {
