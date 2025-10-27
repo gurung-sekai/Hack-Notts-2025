@@ -22,6 +22,8 @@ public class Fighter {
     public final Map<Technique, Integer> cd = new HashMap<>();
     // charging technique (if any)
     public Technique charging = null;
+    // most recent technique used (for AI variety)
+    public Technique lastUsed = null;
 
     public Fighter(String name, Affinity aura, Stats stats) {
         this(name, aura, stats, 1.0, 1.0);

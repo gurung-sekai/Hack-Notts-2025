@@ -27,17 +27,13 @@ public final class GameSecurity {
     private static final Logger LOGGER = Logger.getLogger(GameSecurity.class.getName());
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final HexFormat HEX_FORMAT = HexFormat.of();
-    private static final Map<Path, String> EXPECTED_HASHES;
+    private static final String MANIFEST_RESOURCE = "/security/integrity.manifest";
+    private static final String EXPECTED_MANIFEST_HASH = "bcff6009580dbae53546dbf994fa9e36b08ffe48caaf67842bbdae18d78d3987";
+    private static final IntegrityManifest MANIFEST = IntegrityManifest.load(MANIFEST_RESOURCE);
+    private static final Map<Path, String> EXPECTED_HASHES =
+            Collections.unmodifiableMap(new LinkedHashMap<>(MANIFEST.entries()));
+    private static final boolean MANIFEST_TRUSTED = validateManifestDigest();
     private static volatile boolean verified;
-
-    static {
-        Map<Path, String> hashes = new LinkedHashMap<>();
-        hashes.put(Path.of("src", "World", "DungeonRooms.java"),
-                "b5bf31175fffca5df924f40ea1e1c9fcc3f1cacd8d93fcd18e1a84723b23590e");
-        hashes.put(Path.of("src", "Battle", "scene", "BossBattlePanel.java"),
-                "494e3898875792aed2f2535e587d39063d92fca3c6dff2514309ff8a31da8944");
-        EXPECTED_HASHES = Collections.unmodifiableMap(hashes);
-    }
 
     private GameSecurity() {
     }
@@ -49,11 +45,52 @@ public final class GameSecurity {
         if (verified) {
             return;
         }
+        if (!MANIFEST_TRUSTED) {
+            LOGGER.log(Level.WARNING, "GameSecurity: manifest trust not established; integrity checks skipped");
+            verified = true;
+            return;
+        }
+        if (EXPECTED_HASHES.isEmpty()) {
+            LOGGER.log(Level.WARNING, "GameSecurity: integrity manifest contained no entries; checks skipped");
+            verified = true;
+            return;
+        }
         EXPECTED_HASHES.forEach(GameSecurity::verifyFile);
         verified = true;
     }
 
+    private static boolean validateManifestDigest() {
+        if (MANIFEST.isEmpty()) {
+            LOGGER.log(Level.WARNING, "GameSecurity: integrity manifest missing; runtime checks disabled");
+            return false;
+        }
+        if (EXPECTED_MANIFEST_HASH == null || EXPECTED_MANIFEST_HASH.isBlank()) {
+            LOGGER.log(Level.INFO, "GameSecurity: manifest digest not pinned; continuing without tamper detection");
+            return true;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] expected = HEX_FORMAT.parseHex(EXPECTED_MANIFEST_HASH);
+            byte[] actual = digest.digest(MANIFEST.rawBytes());
+            if (!MessageDigest.isEqual(actual, expected)) {
+                LOGGER.log(Level.SEVERE,
+                        "GameSecurity: manifest digest mismatch (expected {0}, found {1}); runtime checks compromised",
+                        new Object[]{EXPECTED_MANIFEST_HASH, HEX_FORMAT.formatHex(actual)});
+                return false;
+            }
+            LOGGER.log(Level.FINE, "GameSecurity: integrity manifest verified");
+            return true;
+        } catch (NoSuchAlgorithmException ex) {
+            LOGGER.log(Level.SEVERE, "GameSecurity: SHA-256 algorithm missing", ex);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.log(Level.SEVERE, "GameSecurity: integrity manifest hash is malformed", ex);
+        }
+        return false;
+    }
+
     private static void verifyFile(Path file, String expectedHash) {
+        Objects.requireNonNull(file, "file");
+        Objects.requireNonNull(expectedHash, "expectedHash");
         try {
             Optional<Path> candidate = locateExistingFile(file);
             if (candidate.isEmpty()) {
@@ -63,8 +100,9 @@ public final class GameSecurity {
 
             byte[] data = Files.readAllBytes(candidate.get());
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String actual = HEX_FORMAT.formatHex(digest.digest(data));
-            if (!actual.equalsIgnoreCase(expectedHash)) {
+            byte[] actual = digest.digest(data);
+            byte[] expected = HEX_FORMAT.parseHex(expectedHash);
+            if (!MessageDigest.isEqual(actual, expected)) {
                 LOGGER.log(Level.WARNING, "GameSecurity: integrity mismatch for {0}", candidate.get());
             } else {
                 LOGGER.log(Level.FINE, "GameSecurity: verified {0}", candidate.get());
@@ -73,6 +111,8 @@ public final class GameSecurity {
             LOGGER.log(Level.SEVERE, "GameSecurity: unable to verify " + file, ex);
         } catch (NoSuchAlgorithmException ex) {
             LOGGER.log(Level.SEVERE, "GameSecurity: SHA-256 algorithm missing", ex);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.log(Level.SEVERE, "GameSecurity: malformed digest for " + file, ex);
         }
     }
 
