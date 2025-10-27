@@ -3,6 +3,9 @@ package World;
 import World.gfx.DungeonTextures;
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
+import World.cutscene.CutsceneDialog;
+import World.cutscene.CutsceneLibrary;
+import World.cutscene.ShopDialog;
 import gfx.HiDpiScaler;
 import launcher.ControlAction;
 import launcher.ControlsProfile;
@@ -23,6 +26,7 @@ import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
@@ -117,6 +121,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int bowDrawTicks = 0;
         double facingAngle = 0.0;
         double weaponAngle = 0.0;
+        int coinReward = 0;
     }
 
     static class Bullet implements Serializable {
@@ -156,6 +161,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int r = 12;
     }
 
+    static class CoinPickup implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        int x, y;
+        int r = 10;
+        int value = 1;
+        int animTick = 0;
+    }
+
     static class EnemySpawn implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
@@ -179,6 +193,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         Set<Dir> doors = EnumSet.noneOf(Dir.class);
         List<RoomEnemy> enemies = new ArrayList<>();
         List<KeyPickup> keyPickups = new ArrayList<>();
+        List<CoinPickup> coinPickups = new ArrayList<>();
         List<EnemySpawn> enemySpawns = new ArrayList<>();
         EnumSet<Dir> lockedDoors = EnumSet.noneOf(Dir.class);
         boolean cleared = false;
@@ -187,6 +202,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int wallThemeSeed = 0;
         int paletteIndex = -1;
         int accentSeed = 0;
+        Dir shopDoor = null;
+        boolean shopVisited = false;
+        transient boolean backgroundDirty = true;
+        transient int cachedTextureEpoch = -1;
+        transient BufferedImage cachedBackground;
         Room() {
             for (int x = 0; x < COLS; x++)
                 for (int y = 0; y < ROWS; y++)
@@ -311,6 +331,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private int healTicks = 0;
     private double playerDamageBuffer = 0.0;
     private int keysHeld = 0;
+    private int coins = 0;
     private String statusMessage = "";
     private int statusTicks = 0;
     private volatile boolean inBoss = false;
@@ -318,6 +339,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private Dimension renderSize;
     private double scaleX = 1.0;
     private double scaleY = 1.0;
+    private Point shopRoom;
+    private Dir shopDoorFacing;
+    private boolean shopInitialized = false;
+    private boolean goldenKnightIntroShown = false;
+    private boolean queenRescued = false;
+    private boolean finaleShown = false;
+    private int textureEpoch = 0;
 
     public DungeonRooms(GameSettings settings,
                         ControlsProfile controls,
@@ -383,16 +411,24 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         iFrames = 0;
         playerDamageBuffer = 0.0;
         keysHeld = 0;
+        coins = 0;
         statusMessage = "";
         statusTicks = 0;
         inBoss = false;
         paused = false;
+        shopRoom = null;
+        shopDoorFacing = null;
+        shopInitialized = false;
+        goldenKnightIntroShown = false;
+        queenRescued = false;
+        finaleShown = false;
         refreshArtAssets();
         initializeBossPool();
         room = makeOrGetRoom(worldPos, null);
         spawnEnemiesIfNeeded(worldPos, room);
         placePlayerAtCenter();
         visited.add(new Point(worldPos));
+        ensureShopDoor(room, worldPos);
         showMessage(texts.text("intro"));
     }
 
@@ -428,18 +464,37 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         iFrames = snapshot.iFrames();
         playerDamageBuffer = snapshot.playerDamageBuffer();
         keysHeld = snapshot.keysHeld();
+        coins = Math.max(0, snapshot.coins());
         statusMessage = snapshot.statusMessage() == null ? "" : snapshot.statusMessage();
         statusTicks = snapshot.statusTicks();
         inBoss = snapshot.inBoss();
         animTick = snapshot.animTick();
         mouseX = snapshot.mouseX();
         mouseY = snapshot.mouseY();
+        shopRoom = snapshot.shopRoom();
+        shopDoorFacing = snapshot.shopDoorFacing();
+        shopInitialized = snapshot.shopInitialized();
+        goldenKnightIntroShown = snapshot.goldenKnightIntroShown();
+        queenRescued = snapshot.queenRescued();
+        finaleShown = snapshot.finaleShown();
         rng = snapshot.rng();
         secureRandom = snapshot.secureRandom();
         paused = false;
+        if (shopInitialized && shopRoom != null) {
+            Room shop = world.get(shopRoom);
+            if (shop != null) {
+                shop.shopDoor = shopDoorFacing;
+                carveDoorOnGrid(shop, shopDoorFacing);
+            }
+        }
+        if (!shopInitialized) {
+            ensureShopDoor(room, worldPos);
+        }
     }
 
     private void refreshArtAssets() {
+        textureEpoch++;
+        markAllRoomsDirty();
         textures = DungeonTextures.load(TILE);
         playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
         if (playerIdleFrames == null) {
@@ -596,15 +651,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             scaledArrowCache.clear();
         }
         weaponTextures.clear();
-        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true);
-        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true);
-        putWeaponTexture(WeaponType.BOW, "resources/Miscellanious/weapon_bow.png", true);
-        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true);
-        putWeaponTexture(WeaponType.CLAWS, "resources/Miscellanious/weapon_knife.png", true);
-        arrowTexture = rotateHorizontal(loadSpriteImage("resources/Miscellanious/weapon_arrow.png"));
+        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true, true);
+        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true, true);
+        putWeaponTexture(WeaponType.BOW, "resources/Miscellanious/weapon_bow.png", true, false);
+        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true, true);
+        putWeaponTexture(WeaponType.CLAWS, "resources/Miscellanious/weapon_knife.png", true, false);
+        arrowTexture = orientWeapon(loadSpriteImage("resources/Miscellanious/weapon_arrow.png"), true, false);
     }
 
-    private void putWeaponTexture(WeaponType type, String resource, boolean rotateHorizontal) {
+    private void putWeaponTexture(WeaponType type, String resource, boolean rotateHorizontal, boolean flipVertical) {
         if (type == null || resource == null) {
             return;
         }
@@ -612,7 +667,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (img == null) {
             return;
         }
-        BufferedImage prepared = rotateHorizontal ? rotateHorizontal(img) : img;
+        BufferedImage prepared = orientWeapon(img, rotateHorizontal, flipVertical);
         weaponTextures.put(type, prepared);
     }
 
@@ -631,27 +686,43 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private BufferedImage rotateHorizontal(BufferedImage img) {
+    private BufferedImage orientWeapon(BufferedImage img, boolean rotate, boolean flipVertical) {
         if (img == null) {
             return null;
         }
-        int w = img.getWidth();
-        int h = img.getHeight();
-        if (w <= 0 || h <= 0) {
-            return img;
+        BufferedImage result = img;
+        if (rotate) {
+            int w = result.getWidth();
+            int h = result.getHeight();
+            if (w > 0 && h > 0) {
+                BufferedImage rotated = new BufferedImage(h, w, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = rotated.createGraphics();
+                try {
+                    g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                    g.translate(h / 2.0, w / 2.0);
+                    g.rotate(-Math.PI / 2.0);
+                    g.translate(-w / 2.0, -h / 2.0);
+                    g.drawImage(result, 0, 0, null);
+                } finally {
+                    g.dispose();
+                }
+                result = rotated;
+            }
         }
-        BufferedImage rotated = new BufferedImage(h, w, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = rotated.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            g.translate(h / 2.0, w / 2.0);
-            g.rotate(-Math.PI / 2.0);
-            g.translate(-w / 2.0, -h / 2.0);
-            g.drawImage(img, 0, 0, null);
-        } finally {
-            g.dispose();
+        if (flipVertical && result != null) {
+            int w = result.getWidth();
+            int h = result.getHeight();
+            BufferedImage flipped = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = flipped.createGraphics();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                g.drawImage(result, 0, h, w, -h, null);
+            } finally {
+                g.dispose();
+            }
+            result = flipped;
         }
-        return rotated;
+        return result;
     }
 
     private BufferedImage[] loadEnemyAnimation(EnemyType type) {
@@ -937,6 +1008,138 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
+    private void markAllRoomsDirty() {
+        if (world != null) {
+            for (Room r : world.values()) {
+                markRoomDirty(r);
+            }
+        }
+        markRoomDirty(room);
+    }
+
+    private void markRoomDirty(Room r) {
+        if (r == null) {
+            return;
+        }
+        r.backgroundDirty = true;
+        r.cachedBackground = null;
+        r.cachedTextureEpoch = -1;
+    }
+
+    private void ensureShopDoor(Room candidate, Point location) {
+        if (shopInitialized) {
+            return;
+        }
+        Room target = candidate == null ? room : candidate;
+        Point anchor = location == null ? worldPos : location;
+        if (target == null || anchor == null) {
+            return;
+        }
+        Dir door = selectShopDoor(target, anchor);
+        target.shopDoor = door;
+        shopRoom = new Point(anchor);
+        shopDoorFacing = door;
+        if (target.doors != null && !target.doors.contains(door)) {
+            target.doors.add(door);
+        }
+        carveDoorOnGrid(target, door);
+        if (target.lockedDoors != null) {
+            target.lockedDoors.remove(door);
+        }
+        markRoomDirty(target);
+        shopInitialized = true;
+    }
+
+    private Dir selectShopDoor(Room target, Point location) {
+        EnumSet<Dir> pool = EnumSet.allOf(Dir.class);
+        if (target.doors != null) {
+            pool.removeAll(target.doors);
+        }
+        for (Dir d : pool) {
+            if (!hasRoomAt(step(location, d))) {
+                return d;
+            }
+        }
+        for (Dir d : Dir.values()) {
+            if (!hasRoomAt(step(location, d))) {
+                return d;
+            }
+        }
+        return Dir.N;
+    }
+
+    private boolean hasRoomAt(Point p) {
+        return p != null && world != null && world.containsKey(p);
+    }
+
+    private void openShop() {
+        Room current = room;
+        if (current != null) {
+            current.shopVisited = true;
+        }
+        pauseForOverlay(() -> {
+            ShopDialog.Result result = ShopDialog.showShop(SwingUtilities.getWindowAncestor(DungeonRooms.this), coins, playerHP, MAX_PLAYER_HP);
+            coins = Math.max(0, result.remainingCoins());
+            healPlayerTo(result.resultingHp());
+            String remark = result.closingRemark();
+            if (remark != null && !remark.isBlank()) {
+                showMessage(remark);
+            } else {
+                showMessage("The shopkeeper bids you safe travels.");
+            }
+        });
+    }
+
+    private void pauseForOverlay(Runnable runnable) {
+        boolean previousPaused = paused;
+        paused = true;
+        timer.stop();
+        try {
+            runnable.run();
+        } finally {
+            paused = previousPaused;
+            if (!timer.isRunning()) {
+                timer.start();
+            }
+            requestFocusInWindow();
+        }
+    }
+
+    private void healPlayerTo(int targetHp) {
+        int clamped = Math.max(0, Math.min(MAX_PLAYER_HP, targetHp));
+        if (clamped > playerHP) {
+            playerHP = clamped;
+            healTicks = HEAL_FLASH_TICKS;
+        } else {
+            playerHP = clamped;
+        }
+    }
+
+    private void playGoldenKnightIntro() {
+        if (goldenKnightIntroShown) {
+            return;
+        }
+        goldenKnightIntroShown = true;
+        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
+                CutsceneLibrary.goldenKnightMonologue()));
+    }
+
+    private void handleGameWon() {
+        if (finaleShown) {
+            return;
+        }
+        finaleShown = true;
+        pauseForOverlay(() -> {
+            CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
+                    CutsceneLibrary.queenRescued());
+            JOptionPane.showMessageDialog(DungeonRooms.this,
+                    "You saved the queen! Peace returns to the realm.",
+                    "Victory",
+                    JOptionPane.INFORMATION_MESSAGE);
+            exitHandler.run();
+        });
+    }
+
     private RoomEnemy instantiateEnemyFromSpawn(EnemySpawn spawn) {
         RoomEnemy e = new RoomEnemy();
         e.x = spawn.x;
@@ -970,25 +1173,32 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         switch (enemy.type) {
             case ZOMBIE -> {
                 enemy.maxHealth = 3;
+                enemy.coinReward = 4 + rng.nextInt(3);
             }
             case IMP -> {
                 enemy.maxHealth = 2;
+                enemy.coinReward = 3 + rng.nextInt(2);
             }
             case KNIGHT -> {
                 enemy.maxHealth = 6;
                 enemy.braceTicks = 0;
+                enemy.coinReward = 6 + rng.nextInt(4);
             }
             case OGRE -> {
                 enemy.maxHealth = 7;
+                enemy.coinReward = 8 + rng.nextInt(5);
             }
             case PUMPKIN -> {
                 enemy.maxHealth = 3;
+                enemy.coinReward = 5 + rng.nextInt(3);
             }
             case SKELETON -> {
                 enemy.maxHealth = 2;
+                enemy.coinReward = 4 + rng.nextInt(3);
             }
             case WIZARD -> {
                 enemy.maxHealth = 4;
+                enemy.coinReward = 7 + rng.nextInt(4);
             }
         }
         enemy.health = enemy.maxHealth;
@@ -1635,6 +1845,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.spawn.defeated = true;
         }
         spawnKeyPickup(r, enemy.x, enemy.y);
+        if (enemy.coinReward > 0) {
+            spawnCoinPickup(r, enemy.x, enemy.y, enemy.coinReward);
+        }
     }
 
     private void spawnKeyPickup(Room r, int x, int y) {
@@ -1644,6 +1857,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         key.y = y;
         r.keyPickups.add(key);
         showMessage(texts.text("key_drop"));
+    }
+
+    private void spawnCoinPickup(Room r, int x, int y, int value) {
+        if (r == null) {
+            return;
+        }
+        CoinPickup coin = new CoinPickup();
+        coin.x = x;
+        coin.y = y;
+        coin.value = Math.max(1, value);
+        coin.r = Math.max(8, (int) (TILE * 0.25));
+        r.coinPickups.add(coin);
     }
 
     private void updateRoomClearState(Room r) {
@@ -1677,6 +1902,39 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 showMessage(texts.text("key_obtained", keysHeld));
                 updateRoomClearState(room);
             }
+        }
+    }
+
+    private void checkCoinPickup() {
+        if (room == null || room.coinPickups.isEmpty() || player == null) {
+            return;
+        }
+        int pcx = player.x + player.width / 2;
+        int pcy = player.y + player.height / 2;
+        Iterator<CoinPickup> it = room.coinPickups.iterator();
+        while (it.hasNext()) {
+            CoinPickup coin = it.next();
+            double dx = coin.x - pcx;
+            double dy = coin.y - pcy;
+            double maxR = coin.r + Math.min(player.width, player.height) / 2.0;
+            if (dx * dx + dy * dy <= maxR * maxR) {
+                it.remove();
+                int gained = Math.max(1, coin.value);
+                coins += gained;
+                showMessage(String.format("+%d coins (total %d)", gained, coins));
+            }
+        }
+    }
+
+    private void animateCoinPickups() {
+        if (room == null || room.coinPickups.isEmpty()) {
+            return;
+        }
+        for (CoinPickup coin : room.coinPickups) {
+            if (coin == null) {
+                continue;
+            }
+            coin.animTick = (coin.animTick + 1) % 120;
         }
     }
 
@@ -1732,9 +1990,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (encounter == null || encounter.rewardClaimed) return;
         encounter.rewardClaimed = true;
         keysHeld++;
-        playerHP = MAX_PLAYER_HP;
-        showMessage(texts.text("victory_heal", keysHeld, MAX_PLAYER_HP));
-        healTicks = HEAL_FLASH_TICKS;
+        healPlayerTo(MAX_PLAYER_HP);
+        int rewardCoins = 25;
+        coins += rewardCoins;
+        String victory = texts.text("victory_heal", keysHeld, MAX_PLAYER_HP);
+        showMessage(victory + "  +" + rewardCoins + " coins");
     }
 
     private static String formatBossName(BossBattlePanel.BossKind kind) {
@@ -1819,12 +2079,19 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void triggerBossEncounter(BossEncounter encounter) {
         if (encounter == null) return;
+        if (encounter.kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
+            playGoldenKnightIntro();
+        }
         inBoss = true;
         timer.stop();
         Consumer<Outcome> finish = outcome -> SwingUtilities.invokeLater(() -> {
             if (outcome == Outcome.HERO_WIN) {
                 encounter.defeated = true;
                 grantBossReward(encounter);
+                if (encounter.kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
+                    queenRescued = true;
+                    handleGameWon();
+                }
             } else {
                 showMessage(texts.text("boss_repelled"));
                 onPlayerDeath();
@@ -1832,6 +2099,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             inBoss = false;
             iFrames = 60; // grace on return
             timer.start();
+            up = down = left = right = false;
             requestFocusInWindow();
         });
 
@@ -1927,6 +2195,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     if (inBounds(bx + dx, by + dy))
                         r.g[bx + dx][by + dy] = T.WALL;
         }
+        markRoomDirty(r);
         // Revalidate enemies: push out of walls if necessary
         List<RoomEnemy> kept = new ArrayList<>();
         for (RoomEnemy e : r.enemies) {
@@ -1965,6 +2234,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case E -> inside.x = t.x - 1;
         }
         if (inBounds(inside.x, inside.y)) r.g[inside.x][inside.y] = T.FLOOR;
+        markRoomDirty(r);
     }
 
     private boolean nearAnyDoor(Room r, int tx, int ty, int dist) {
@@ -2056,6 +2326,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         updatePlayer();
         updateCombat();
         checkKeyPickup();
+        checkCoinPickup();
+        animateCoinPickups();
         if (statusTicks > 0) {
             statusTicks--;
             if (statusTicks == 0) statusMessage = "";
@@ -2152,6 +2424,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void switchRoom(Dir exitSide) {
+        if (room != null && room.shopDoor == exitSide) {
+            openShop();
+            return;
+        }
         boolean consumedKey = false;
         if (room.lockedDoors.contains(exitSide)) {
             if (keysHeld <= 0) {
@@ -2278,37 +2554,60 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void drawWorld(Graphics2D gg) {
-        ensureRoomTheme(room);
-        RoomPalette palette = paletteFor(room);
+    private BufferedImage renderRoomBackground(Room target, RoomPalette palette) {
+        if (target == null) {
+            return null;
+        }
+        if (!target.backgroundDirty && target.cachedBackground != null && target.cachedTextureEpoch == textureEpoch) {
+            return target.cachedBackground;
+        }
+        BufferedImage img = new BufferedImage(COLS * TILE, ROWS * TILE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            if (textures != null && textures.isReady()) {
+                paintRoomTiles(g, target, palette);
+            } else {
+                g.setColor(new Color(18, 64, 78));
+                g.fillRect(0, 0, img.getWidth(), img.getHeight());
+            }
+        } finally {
+            g.dispose();
+        }
+        target.cachedBackground = img;
+        target.cachedTextureEpoch = textureEpoch;
+        target.backgroundDirty = false;
+        return img;
+    }
+
+    private void paintRoomTiles(Graphics2D gg, Room target, RoomPalette palette) {
+        if (target == null) {
+            return;
+        }
         for (int x = 0; x < COLS; x++) {
             for (int y = 0; y < ROWS; y++) {
                 int px = x * TILE, py = y * TILE;
-                T t = room.g[x][y];
+                T t = target.g[x][y];
                 if (textures != null && textures.isReady()) {
                     int fCount = Math.max(1, textures.floorVariants());
                     int wCount = Math.max(1, textures.wallVariants());
-                    int fIdx = Math.floorMod(room.floorThemeSeed + x * 17 + y * 31, fCount);
-                    int wIdx = Math.floorMod(room.wallThemeSeed + x * 13 + y * 19, wCount);
+                    int fIdx = Math.floorMod(target.floorThemeSeed + x * 17 + y * 31, fCount);
+                    int wIdx = Math.floorMod(target.wallThemeSeed + x * 13 + y * 19, wCount);
                     switch (t) {
-                        case FLOOR -> drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, room, x, y);
-                        case WALL  -> drawWallTile(gg, textures.wallVariant(wIdx),  px, py, palette, room, x, y);
+                        case FLOOR -> drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, target, x, y);
+                        case WALL  -> drawWallTile(gg, textures.wallVariant(wIdx),  px, py, palette, target, x, y);
                         case DOOR  -> {
                             BufferedImage doorTile = textures.doorFloor();
                             if (doorTile != null) {
-                                drawFloorTile(gg, doorTile, px, py, palette, room, x, y);
+                                drawFloorTile(gg, doorTile, px, py, palette, target, x, y);
                             } else {
-                                drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, room, x, y);
+                                drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, target, x, y);
                             }
                             gg.setColor(new Color(220, 172, 60));
                             if (x == 0 || x == COLS - 1)
                                 gg.fillRect(px + (x == 0 ? 0 : TILE - 6), py + 6, 6, TILE - 12);
                             if (y == 0 || y == ROWS - 1)
                                 gg.fillRect(px + 6, py + (y == 0 ? 0 : TILE - 6), TILE - 12, 6);
-                            Dir doorDir = dirForTile(x, y);
-                            if (doorDir != null && room.lockedDoors.contains(doorDir)) {
-                                drawPadlock(gg, px, py);
-                            }
                         }
                         default -> {}
                     }
@@ -2318,12 +2617,39 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 }
             }
         }
+    }
+
+    private void drawWorld(Graphics2D gg) {
+        ensureRoomTheme(room);
+        RoomPalette palette = paletteFor(room);
+        BufferedImage cached = renderRoomBackground(room, palette);
+        if (cached != null) {
+            gg.drawImage(cached, 0, 0, null);
+        } else {
+            paintRoomTiles(gg, room, palette);
+        }
+        if (room != null && room.shopDoor != null && room.lockedDoors.contains(room.shopDoor)) {
+            // shop doors never lock but keep defensive guard
+            room.lockedDoors.remove(room.shopDoor);
+        }
+        if (room != null) {
+            for (Dir d : room.lockedDoors) {
+                Point tile = doorTile(d);
+                int px = tile.x * TILE;
+                int py = tile.y * TILE;
+                drawPadlock(gg, px, py);
+            }
+        }
 
         for (KeyPickup key : room.keyPickups) {
             gg.setColor(new Color(255, 215, 82));
             gg.fillOval(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
             gg.setColor(new Color(140, 90, 30));
             gg.drawOval(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
+        }
+
+        for (CoinPickup coin : room.coinPickups) {
+            drawCoinPickup(gg, coin);
         }
 
         for (RoomEnemy e : room.enemies) {
@@ -2832,8 +3158,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 keyName(ControlAction.PAUSE));
         overlay.drawString("HP: " + playerHP + (iFrames>0?" (invul)":""), 10, 18);
         overlay.drawString(controlsLine, 10, 34);
-        overlay.drawString(String.format("Room (%d,%d)  Keys: %d", worldPos.x, worldPos.y, keysHeld), 10, 50);
-        overlay.drawString(texts.text("story"), 10, 66);
+        overlay.drawString(String.format("Keys: %d    Coins: %d", keysHeld, coins), 10, 50);
+        overlay.drawString(String.format("Room (%d,%d)", worldPos.x, worldPos.y), 10, 66);
+        overlay.drawString(texts.text("story"), 10, 82);
         if (isBossRoom(worldPos)) {
             overlay.drawString("Guardian Lair", getWidth() - 160, 18);
         }
@@ -3007,6 +3334,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             if (p == null) {
                 continue;
             }
+            Room roomData = world.get(p);
+            if (roomData == null) {
+                continue;
+            }
             Rectangle rect = cellRects.get(pointKey(p));
             if (rect == null) {
                 continue;
@@ -3036,6 +3367,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 overlay.setColor(new Color(255, 255, 255, 230));
                 overlay.setStroke(new BasicStroke(1.8f));
                 overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            }
+            if (roomData.shopDoor != null) {
+                overlay.setColor(new Color(255, 214, 120, 240));
+                int iconSize = Math.max(6, roomSize / 3);
+                int iconX = drawX + roomSize - iconSize - 4;
+                int iconY = drawY + 4;
+                overlay.fillOval(iconX, iconY, iconSize, iconSize);
+                overlay.setColor(new Color(64, 40, 12, 220));
+                Font originalFont = overlay.getFont();
+                overlay.setFont(originalFont.deriveFont(Font.BOLD, Math.max(10f, iconSize - 2f)));
+                overlay.drawString("S", iconX + iconSize / 4f, iconY + iconSize * 0.8f);
+                overlay.setFont(originalFont);
             }
         }
 
@@ -3068,6 +3411,32 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.setColor(new Color(214, 186, 90));
         gg.drawRoundRect(cx, cy, lockWidth, lockHeight, 4, 4);
         gg.drawLine(cx + lockWidth / 2, cy + 3, cx + lockWidth / 2, cy + lockHeight - 3);
+    }
+
+    private void drawCoinPickup(Graphics2D gg, CoinPickup coin) {
+        if (coin == null) {
+            return;
+        }
+        int radius = Math.max(8, coin.r);
+        double phase = (coin.animTick % 120) / 120.0;
+        int bob = (int) Math.round(Math.sin(phase * Math.PI * 2) * 4);
+        int cx = coin.x;
+        int cy = coin.y - bob;
+        java.awt.Paint oldPaint = gg.getPaint();
+        gg.setPaint(new RadialGradientPaint(
+                new Point2D.Float(cx, cy),
+                radius,
+                new float[]{0f, 0.6f, 1f},
+                new Color[]{
+                        new Color(255, 252, 182, 255),
+                        new Color(235, 210, 90, 255),
+                        new Color(180, 120, 20, 220)
+                }
+        ));
+        gg.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
+        gg.setPaint(oldPaint);
+        gg.setColor(new Color(255, 255, 210, 200));
+        gg.drawOval(cx - radius, cy - radius, radius * 2, radius * 2);
     }
 
     // ======= Input =======
@@ -3178,12 +3547,19 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 playerDamageBuffer,
                 iFrames,
                 keysHeld,
+                coins,
                 statusMessage,
                 statusTicks,
                 inBoss,
                 animTick,
                 mouseX,
                 mouseY,
+                shopRoom,
+                shopDoorFacing,
+                shopInitialized,
+                goldenKnightIntroShown,
+                queenRescued,
+                finaleShown,
                 rng,
                 secureRandom
         );
@@ -3239,6 +3615,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     if (inBounds(bx + dx, by + dy))
                         r.g[bx + dx][by + dy] = T.WALL;
         }
+        markRoomDirty(r);
         return r;
     }
 
