@@ -2,6 +2,7 @@ package World;
 
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
+import World.DialogueText;
 import World.cutscene.CutsceneDialog;
 import World.cutscene.CutsceneLibrary;
 import World.cutscene.CutsceneScript;
@@ -1756,6 +1757,40 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.attackAnimTicks = 20;
     }
 
+    private void triggerMeleeSwing(RoomEnemy enemy) {
+        if (enemy == null) {
+            return;
+        }
+        if (enemy.weapon != WeaponType.SWORD && enemy.weapon != WeaponType.HAMMER) {
+            return;
+        }
+        int duration = enemy.weapon == WeaponType.HAMMER ? 26 : 16;
+        enemy.attackAnimDuration = duration;
+        enemy.attackAnimTicks = duration;
+        enemy.weaponAngle = enemy.facingAngle;
+    }
+
+    private void startBowDraw(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
+    }
+
     private void applyPlayerDamage(double damage) {
         if (player == null || damage <= 0) {
             return;
@@ -3364,7 +3399,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         overlay.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
-        Font hudFont = UndertaleText.font(18f);
+        Font hudFont = DialogueText.font(18f);
         overlay.setFont(hudFont);
         FontMetrics fm = overlay.getFontMetrics(hudFont);
         int padding = 14;
@@ -3399,18 +3434,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         Rectangle infoBox = new Rectangle(10, 10, infoWidth + padding * 2,
                 lineHeight * infoLines.size() + padding * 2);
-        UndertaleText.paintFrame(overlay, infoBox, 22);
+        DialogueText.paintFrame(overlay, infoBox, 22);
 
         int textY = infoBox.y + padding + fm.getAscent();
         for (String line : infoLines) {
-            UndertaleText.drawString(overlay, line, infoBox.x + padding, textY);
+            DialogueText.drawString(overlay, line, infoBox.x + padding, textY);
             textY += lineHeight;
         }
 
         if (isBossRoom(worldPos)) {
             String label = "GUARDIAN LAIR";
             int labelWidth = fm.stringWidth(label);
-            UndertaleText.drawString(overlay, label,
+            DialogueText.drawString(overlay, label,
                     Math.max(infoBox.x + infoBox.width + 20, getWidth() - labelWidth - padding),
                     infoBox.y + fm.getAscent() + padding);
         }
@@ -3433,9 +3468,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             int boxHeight = padding * 2 + Math.max(1, messageLines) * lineHeight;
             int boxY = getHeight() - boxHeight - 10;
             Rectangle statusBox = new Rectangle(boxX, boxY, baseWidth, boxHeight);
-            UndertaleText.paintFrame(overlay, statusBox, 18);
+            DialogueText.paintFrame(overlay, statusBox, 18);
             int messageY = statusBox.y + padding + fm.getAscent();
-            UndertaleText.drawParagraph(overlay, statusMessage.toUpperCase(Locale.ENGLISH),
+            DialogueText.drawParagraph(overlay, statusMessage.toUpperCase(Locale.ENGLISH),
                     statusBox.x + padding, messageY, statusBox.width - padding * 2);
         }
     }
@@ -3557,7 +3592,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         overlay.drawRoundRect(mapX, mapY, mapWidth, mapHeight, 18, 18);
 
         overlay.setColor(new Color(218, 234, 240));
-        UndertaleText.drawString(overlay,
+        DialogueText.drawString(overlay,
                 texts.text("hud_map").toUpperCase(Locale.ENGLISH),
                 mapX + MINIMAP_HORIZONTAL_PADDING, mapY + 18);
 
@@ -3671,15 +3706,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int footerY = mapY + mapHeight - 18;
         overlay.setStroke(originalStroke);
         overlay.setColor(new Color(210, 226, 232));
-        UndertaleText.drawString(overlay,
+        DialogueText.drawString(overlay,
                 texts.text("hud_rooms", visitedRooms.size()).toUpperCase(Locale.ENGLISH),
                 mapX + MINIMAP_HORIZONTAL_PADDING, footerY);
-        UndertaleText.drawString(overlay,
+        DialogueText.drawString(overlay,
                 texts.text("hud_exits", accessible.size()).toUpperCase(Locale.ENGLISH),
                 mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 16);
         if (!locked.isEmpty()) {
             overlay.setColor(new Color(235, 210, 160));
-            UndertaleText.drawString(overlay,
+            DialogueText.drawString(overlay,
                     texts.text("hud_locked", locked.size()).toUpperCase(Locale.ENGLISH),
                     mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 32);
         }

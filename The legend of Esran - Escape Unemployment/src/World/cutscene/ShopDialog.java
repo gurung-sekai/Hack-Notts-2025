@@ -1,6 +1,6 @@
 package World.cutscene;
 
-import World.UndertaleText;
+import World.DialogueText;
 import gfx.HiDpiScaler;
 
 import javax.swing.*;
@@ -91,9 +91,9 @@ public final class ShopDialog extends JDialog {
             JPanel info = new JPanel(new GridLayout(2, 1));
             info.setOpaque(false);
             coinsLabel.setForeground(new Color(255, 236, 160));
-            coinsLabel.setFont(UndertaleText.font(scaledFont(18f)));
+            coinsLabel.setFont(DialogueText.font(scaledFont(18f)));
             hpLabel.setForeground(new Color(200, 230, 255));
-            hpLabel.setFont(UndertaleText.font(scaledFont(18f)));
+            hpLabel.setFont(DialogueText.font(scaledFont(18f)));
             info.add(coinsLabel);
             info.add(hpLabel);
             add(info, BorderLayout.NORTH);
@@ -233,7 +233,7 @@ public final class ShopDialog extends JDialog {
         button.setRolloverEnabled(true);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         button.setForeground(new Color(250, 240, 220));
-        button.setFont(UndertaleText.font(fontSize));
+        button.setFont(DialogueText.font(fontSize));
         int pad = scaleToInt(10);
         button.setBorder(BorderFactory.createEmptyBorder(pad, pad * 2, pad, pad * 2));
         button.setHorizontalAlignment(SwingConstants.LEFT);
@@ -356,8 +356,8 @@ public final class ShopDialog extends JDialog {
                 Rectangle bounds = new Rectangle(pad, pad, Math.max(0, getWidth() - pad * 2),
                         Math.max(0, getHeight() - pad * 2));
                 int arc = scaleToInt(32);
-                UndertaleText.paintFrame(g2, bounds, arc);
-                UndertaleText.apply(g2, scaledFont(18f));
+                DialogueText.paintFrame(g2, bounds, arc);
+                DialogueText.apply(g2, scaledFont(18f));
                 FontMetrics fm = g2.getFontMetrics();
                 int textX = bounds.x + scaleToInt(18);
                 int textY = bounds.y + fm.getAscent() + scaleToInt(12);
@@ -365,7 +365,7 @@ public final class ShopDialog extends JDialog {
                 String display = revealedCharacters >= message.length()
                         ? message
                         : message.substring(0, Math.min(revealedCharacters, message.length()));
-                UndertaleText.drawParagraph(g2, display, textX, textY, width);
+                DialogueText.drawParagraph(g2, display, textX, textY, width);
                 if (cursorVisible && revealedCharacters >= message.length()) {
                     int cursorSize = scaleToInt(10);
                     int cursorX = bounds.x + bounds.width - scaleToInt(28);
@@ -416,7 +416,7 @@ public final class ShopDialog extends JDialog {
             try {
                 g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
                 int baseline = textRect.y + g2.getFontMetrics().getAscent();
-                UndertaleText.drawString(g2, text == null ? "" : text.toUpperCase(Locale.ENGLISH),
+                DialogueText.drawString(g2, text == null ? "" : text.toUpperCase(Locale.ENGLISH),
                         textRect.x, baseline);
             } finally {
                 g2.dispose();
