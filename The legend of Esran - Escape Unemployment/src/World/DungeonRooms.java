@@ -1717,6 +1717,44 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
+    }
+
+    private void triggerMeleeSwing(RoomEnemy enemy) {
+        if (enemy == null) {
+            return;
+        }
+        if (enemy.weapon != WeaponType.SWORD && enemy.weapon != WeaponType.HAMMER) {
+            return;
+        }
+        int duration = enemy.weapon == WeaponType.HAMMER ? 26 : 16;
+        enemy.attackAnimDuration = duration;
+        enemy.attackAnimTicks = duration;
+        enemy.weaponAngle = enemy.facingAngle;
+    }
+
+    private void startBowDraw(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
     }
 
     private void triggerMeleeSwing(RoomEnemy enemy) {
@@ -2801,6 +2839,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 gg.drawOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
                 drawEnemyWeapon(gg, e);
             }
+            drawEnemyWeapon(gg, e);
         }
 
         if (playerIdleFrames != null && playerIdleFrames.length > 0){
