@@ -95,7 +95,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     enum ProjectileKind { ORB, ARROW }
 
-    static class Enemy implements Serializable {
+    static class RoomEnemy implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
         int x, y;
@@ -176,7 +176,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         private static final long serialVersionUID = 1L;
         T[][] g = new T[COLS][ROWS];
         Set<Dir> doors = EnumSet.noneOf(Dir.class);
-        List<Enemy> enemies = new ArrayList<>();
+        List<RoomEnemy> enemies = new ArrayList<>();
         List<KeyPickup> keyPickups = new ArrayList<>();
         List<EnemySpawn> enemySpawns = new ArrayList<>();
         EnumSet<Dir> lockedDoors = EnumSet.noneOf(Dir.class);
@@ -705,7 +705,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         for (EnemySpawn spawn : r.enemySpawns) {
             if (spawn.defeated) continue;
-            Enemy e = instantiateEnemyFromSpawn(spawn);
+            RoomEnemy e = instantiateEnemyFromSpawn(spawn);
             r.enemies.add(e);
         }
     }
@@ -784,7 +784,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
         }
         if (room.enemies != null) {
-            for (Enemy enemy : room.enemies) {
+            for (RoomEnemy enemy : room.enemies) {
                 if (enemy == null) {
                     continue;
                 }
@@ -814,8 +814,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private Enemy instantiateEnemyFromSpawn(EnemySpawn spawn) {
-        Enemy e = new Enemy();
+    private RoomEnemy instantiateEnemyFromSpawn(EnemySpawn spawn) {
+        RoomEnemy e = new RoomEnemy();
         e.x = spawn.x;
         e.y = spawn.y;
         e.cd = rng.nextInt(45);
@@ -830,7 +830,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return e;
     }
 
-    private void applyEnemyDefaults(Enemy enemy) {
+    private void applyEnemyDefaults(RoomEnemy enemy) {
         switch (enemy.type) {
             case ZOMBIE -> {
                 enemy.size = (int) (TILE * 0.68);
@@ -1018,7 +1018,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int pcx = player.x + player.width/2;
         int pcy = player.y + player.height/2;
 
-        for (Enemy e : room.enemies) {
+        for (RoomEnemy e : room.enemies) {
             if (!e.alive) {
                 continue;
             }
@@ -1036,7 +1036,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         explosions.removeIf(ex -> ex.age >= ex.life);
     }
 
-    private void updateEnemyBehavior(Enemy enemy, int pcx, int pcy) {
+    private void updateEnemyBehavior(RoomEnemy enemy, int pcx, int pcy) {
         if (enemy == null || !enemy.alive) {
             return;
         }
@@ -1240,7 +1240,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     continue;
                 }
             }
-            for (Enemy enemy : room.enemies) {
+            for (RoomEnemy enemy : room.enemies) {
                 if (!enemy.alive || !b.alive) {
                     continue;
                 }
@@ -1275,7 +1275,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 new Color(200, 240, 255), new Color(150, 210, 255)));
     }
 
-    private void attemptMeleeStrike(Enemy enemy, double range, double damage, int cooldown) {
+    private void attemptMeleeStrike(RoomEnemy enemy, double range, double damage, int cooldown) {
         if (enemy.cd > 0) {
             return;
         }
@@ -1286,7 +1286,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void triggerMeleeSwing(Enemy enemy) {
+    private void triggerMeleeSwing(RoomEnemy enemy) {
         if (enemy == null) {
             return;
         }
@@ -1299,7 +1299,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.weaponAngle = enemy.facingAngle;
     }
 
-    private void startBowDraw(Enemy enemy, double angle) {
+    private void startBowDraw(RoomEnemy enemy, double angle) {
         if (enemy == null) {
             return;
         }
@@ -1310,41 +1310,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
     }
 
-    private void triggerStaffCast(Enemy enemy, double angle) {
-        if (enemy == null) {
-            return;
-        }
-        enemy.weapon = WeaponType.STAFF;
-        enemy.weaponAngle = angle;
-        enemy.attackAnimDuration = 20;
-        enemy.attackAnimTicks = 20;
-    }
-
-    private void triggerMeleeSwing(Enemy enemy) {
-        if (enemy == null) {
-            return;
-        }
-        if (enemy.weapon != WeaponType.SWORD && enemy.weapon != WeaponType.HAMMER) {
-            return;
-        }
-        int duration = enemy.weapon == WeaponType.HAMMER ? 26 : 16;
-        enemy.attackAnimDuration = duration;
-        enemy.attackAnimTicks = duration;
-        enemy.weaponAngle = enemy.facingAngle;
-    }
-
-    private void startBowDraw(Enemy enemy, double angle) {
-        if (enemy == null) {
-            return;
-        }
-        enemy.weapon = WeaponType.BOW;
-        enemy.weaponAngle = angle;
-        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
-        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
-        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
-    }
-
-    private void triggerStaffCast(Enemy enemy, double angle) {
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
         if (enemy == null) {
             return;
         }
@@ -1374,7 +1340,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void applyDamageToEnemy(Enemy enemy, double damage) {
+    private void applyDamageToEnemy(RoomEnemy enemy, double damage) {
         if (enemy == null || !enemy.alive || damage <= 0) {
             return;
         }
@@ -1393,7 +1359,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void moveEnemyToward(Enemy enemy, int targetX, int targetY, double speed) {
+    private void moveEnemyToward(RoomEnemy enemy, int targetX, int targetY, double speed) {
         double dx = targetX - enemy.x;
         double dy = targetY - enemy.y;
         double len = Math.hypot(dx, dy);
@@ -1418,11 +1384,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private void moveEnemyAway(Enemy enemy, int targetX, int targetY, double speed) {
+    private void moveEnemyAway(RoomEnemy enemy, int targetX, int targetY, double speed) {
         moveEnemyToward(enemy, targetX, targetY, -speed);
     }
 
-    private void strafeEnemy(Enemy enemy, int targetX, int targetY, double speed, boolean clockwise) {
+    private void strafeEnemy(RoomEnemy enemy, int targetX, int targetY, double speed, boolean clockwise) {
         double dx = targetX - enemy.x;
         double dy = targetY - enemy.y;
         double len = Math.hypot(dx, dy);
@@ -1471,7 +1437,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return true;
     }
 
-    private void castWizardPattern(Enemy enemy, int pcx, int pcy) {
+    private void castWizardPattern(RoomEnemy enemy, int pcx, int pcy) {
         double baseAngle = Math.atan2(pcy - enemy.y, pcx - enemy.x);
         triggerStaffCast(enemy, baseAngle);
         int pattern = enemy.patternIndex % 3;
@@ -1493,7 +1459,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.patternIndex = (enemy.patternIndex + 1) % 6;
     }
 
-    private void spawnEnemyProjectile(Enemy shooter, double targetX, double targetY, double speed,
+    private void spawnEnemyProjectile(RoomEnemy shooter, double targetX, double targetY, double speed,
                                       double damage, int radius, boolean useTexture, Color tint,
                                       boolean explosive, int explosionRadius, int explosionLife) {
         if (shooter == null) {
@@ -1503,7 +1469,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         spawnEnemyProjectileAngle(shooter, angle, speed, damage, radius, useTexture, tint, explosive, explosionRadius, explosionLife);
     }
 
-    private void spawnEnemyProjectileAngle(Enemy shooter, double angle, double speed, double damage,
+    private void spawnEnemyProjectileAngle(RoomEnemy shooter, double angle, double speed, double damage,
                                            int radius, boolean useTexture, Color tint,
                                            boolean explosive, int explosionRadius, int explosionLife) {
         Bullet b = new Bullet();
@@ -1533,7 +1499,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         bullets.add(b);
     }
 
-    private void eliminateEnemy(Room r, Enemy enemy) {
+    private void eliminateEnemy(Room r, RoomEnemy enemy) {
         if (enemy == null || !enemy.alive) return;
         enemy.alive = false;
         if (enemy.spawn != null) {
@@ -1833,8 +1799,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                         r.g[bx + dx][by + dy] = T.WALL;
         }
         // Revalidate enemies: push out of walls if necessary
-        List<Enemy> kept = new ArrayList<>();
-        for (Enemy e : r.enemies) {
+        List<RoomEnemy> kept = new ArrayList<>();
+        for (RoomEnemy e : r.enemies) {
             if (isRectFree(r, e.x, e.y, e.size/2)) { kept.add(e); continue; }
             boolean placed = false;
             // Try spiral search around current tile
@@ -2010,7 +1976,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (!blocked) player = next;
     }
 
-    private void attemptEnemyMove(Enemy e, int dx, int dy) {
+    private void attemptEnemyMove(RoomEnemy e, int dx, int dy) {
         if (dx == 0 && dy == 0) return;
         int nx = e.x + dx;
         int ny = e.y + dy;
@@ -2231,7 +2197,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.drawOval(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
         }
 
-        for (Enemy e : room.enemies) {
+        for (RoomEnemy e : room.enemies) {
             if (!e.alive) continue;
             BufferedImage[] frames = enemyIdleAnimations.get(e.type);
             if (frames == null || frames.length == 0) {
@@ -2385,7 +2351,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return seed + tx * 53 + ty * 97 + salt * 131;
     }
 
-    private void drawEnemyWeapon(Graphics2D gg, Enemy enemy) {
+    private void drawEnemyWeapon(Graphics2D gg, RoomEnemy enemy) {
         if (enemy == null || !enemy.alive) {
             return;
         }
@@ -2399,7 +2365,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private double computeSwingAngle(Enemy enemy, double sweepRadians) {
+    private double computeSwingAngle(RoomEnemy enemy, double sweepRadians) {
         double base = enemy.weaponAngle;
         if (!Double.isFinite(base)) {
             base = 0.0;
@@ -2412,7 +2378,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return base - sweepRadians / 2.0 + progress * sweepRadians;
     }
 
-    private void drawSword(Graphics2D gg, Enemy enemy) {
+    private void drawSword(Graphics2D gg, RoomEnemy enemy) {
         double angle = computeSwingAngle(enemy, Math.toRadians(110));
         int offset = Math.max(10, enemy.size / 2);
         int bladeLength = (int) (TILE * 1.1);
@@ -2433,7 +2399,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.setTransform(original);
     }
 
-    private void drawHammer(Graphics2D gg, Enemy enemy) {
+    private void drawHammer(Graphics2D gg, RoomEnemy enemy) {
         double angle = computeSwingAngle(enemy, Math.toRadians(140));
         int offset = Math.max(8, enemy.size / 2);
         int handleLength = (int) (TILE * 1.0);
@@ -2455,7 +2421,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.setTransform(original);
     }
 
-    private void drawBow(Graphics2D gg, Enemy enemy) {
+    private void drawBow(Graphics2D gg, RoomEnemy enemy) {
         double angle = enemy.weaponAngle;
         int offset = Math.max(6, enemy.size / 2 - 4);
         int bowHeight = Math.max(TILE, enemy.size + TILE / 3);
@@ -2485,7 +2451,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.setTransform(original);
     }
 
-    private void drawStaff(Graphics2D gg, Enemy enemy) {
+    private void drawStaff(Graphics2D gg, RoomEnemy enemy) {
         double angle = enemy.weaponAngle;
         int offset = Math.max(6, enemy.size / 2 - 4);
         int staffLength = (int) (TILE * 1.05);

@@ -274,13 +274,13 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return result;
     }
 
-    private static List<DungeonRooms.Enemy> copyEnemies(List<DungeonRooms.Enemy> enemies) {
-        List<DungeonRooms.Enemy> list = new ArrayList<>();
+    private static List<DungeonRooms.RoomEnemy> copyEnemies(List<DungeonRooms.RoomEnemy> enemies) {
+        List<DungeonRooms.RoomEnemy> list = new ArrayList<>();
         if (enemies == null) {
             return list;
         }
-        for (DungeonRooms.Enemy enemy : enemies) {
-            DungeonRooms.Enemy e = new DungeonRooms.Enemy();
+        for (DungeonRooms.RoomEnemy enemy : enemies) {
+            DungeonRooms.RoomEnemy e = new DungeonRooms.RoomEnemy();
             e.x = enemy.x;
             e.y = enemy.y;
             e.size = enemy.size;
