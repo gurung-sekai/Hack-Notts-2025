@@ -69,7 +69,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     static final int ROWS = 13;           // room height (odd looks nice)
     static final int FPS  = 60;
     static final int PLAYER_SIZE = (int)(TILE * 0.6);
-    static final int PLAYER_SPEED = 4;    // px per tick
+    static final int PLAYER_SPEED = 3;    // px per tick (tempered for slower pacing)
     static final Color BG = new Color(6, 24, 32);
     static final int PLAYER_PROJECTILE_RADIUS = 6;
     static final int ENEMY_PROJECTILE_RADIUS = 5;
@@ -86,6 +86,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     enum T { VOID, FLOOR, WALL, DOOR }
     enum Dir { N, S, W, E }
 
+    enum EnemyType { ZOMBIE, IMP, KNIGHT, OGRE, PUMPKIN, SKELETON, WIZARD }
+
     static class Enemy implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
@@ -93,6 +95,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int size = (int)(TILE * 0.6);
         int cd = 0;
         boolean alive = true;
+        EnemyType type = EnemyType.ZOMBIE;
+        int maxHealth = 3;
+        int health = 3;
+        int braceTicks = 0;
+        int windup = 0;
+        int patternIndex = 0;
+        double damageBuffer = 0.0;
         EnemySpawn spawn;
     }
 
@@ -103,6 +112,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         double vx, vy;
         int r = ENEMY_PROJECTILE_RADIUS;
         boolean alive = true;
+        double damage = 1.0;
+        int life = 0;
+        int maxLife = 420;
+        boolean friendly = false;
+        boolean useTexture = true;
+        java.awt.Color tint;
+        boolean explosive = false;
+        int explosionRadius = 0;
+        int explosionLife = 0;
     }
 
     static class Explosion implements Serializable {
@@ -112,6 +130,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int age = 0;
         int life = 18;
         int maxR = 22;
+        Color inner = new Color(255, 200, 80);
+        Color outer = new Color(255, 240, 160);
     }
 
     static class KeyPickup implements Serializable {
@@ -126,6 +146,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         private static final long serialVersionUID = 1L;
         int x, y;
         boolean defeated = false;
+        EnemyType type = EnemyType.ZOMBIE;
     }
 
     static class BossEncounter implements Serializable {
@@ -147,6 +168,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         EnumSet<Dir> lockedDoors = EnumSet.noneOf(Dir.class);
         boolean cleared = false;
         boolean spawnsPrepared = false;
+        int floorThemeSeed = 0;
+        int wallThemeSeed = 0;
         Room() {
             for (int x = 0; x < COLS; x++)
                 for (int y = 0; y < ROWS; y++)
@@ -200,6 +223,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private int playerHP = MAX_PLAYER_HP;
     private int iFrames = 0;
     private int healTicks = 0;
+    private double playerDamageBuffer = 0.0;
     private int keysHeld = 0;
     private String statusMessage = "";
     private int statusTicks = 0;
@@ -271,6 +295,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         up = down = left = right = false;
         playerHP = MAX_PLAYER_HP;
         iFrames = 0;
+        playerDamageBuffer = 0.0;
         keysHeld = 0;
         statusMessage = "";
         statusTicks = 0;
@@ -299,6 +324,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (player == null) {
             placePlayerAtCenter();
         }
+        ensureRoomTheme(room);
+        normalizeEnemyState(room);
         up = snapshot.moveUp();
         down = snapshot.moveDown();
         left = snapshot.moveLeft();
@@ -313,6 +340,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         explosions.addAll(snapshot.explosions());
         playerHP = snapshot.playerHP();
         iFrames = snapshot.iFrames();
+        playerDamageBuffer = snapshot.playerDamageBuffer();
         keysHeld = snapshot.keysHeld();
         statusMessage = snapshot.statusMessage() == null ? "" : snapshot.statusMessage();
         statusTicks = snapshot.statusTicks();
@@ -358,6 +386,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 continue;
             }
             b.r = desiredRadius;
+            if (b.maxLife <= 0) {
+                b.maxLife = 420;
+            }
+            if (b.damage <= 0) {
+                b.damage = 1.0;
+            }
+            if (b.tint == null && !b.friendly) {
+                b.useTexture = true;
+            }
         }
     }
 
@@ -455,11 +492,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int diameter = Math.max(4, bullet.r * 2);
         int drawX = (int) Math.round(bullet.x - diameter / 2.0);
         int drawY = (int) Math.round(bullet.y - diameter / 2.0);
-        if (texture != null) {
+        boolean renderTexture = texture != null && bullet.useTexture;
+        if (renderTexture) {
             g.drawImage(texture, drawX, drawY, diameter, diameter, null);
-        } else {
+        }
+        if (!renderTexture) {
             Color original = g.getColor();
-            g.setColor(fallbackColour == null ? Color.WHITE : fallbackColour);
+            Color colour = bullet.tint != null ? bullet.tint : (fallbackColour == null ? Color.WHITE : fallbackColour);
+            g.setColor(colour);
             g.fillOval(drawX, drawY, diameter, diameter);
             g.setColor(original);
         }
@@ -485,6 +525,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (mustHaveEntrance != null) {
             r.lockedDoors.remove(mustHaveEntrance);
         }
+        ensureRoomTheme(r);
+        normalizeEnemyState(r);
         return r;
     }
 
@@ -513,18 +555,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         for (EnemySpawn spawn : r.enemySpawns) {
             if (spawn.defeated) continue;
-            Enemy e = new Enemy();
-            e.x = spawn.x;
-            e.y = spawn.y;
-            e.cd = rng.nextInt(30);
-            e.spawn = spawn;
+            Enemy e = instantiateEnemyFromSpawn(spawn);
             r.enemies.add(e);
         }
     }
 
     private void initializeEnemySpawns(Room r) {
         if (r == null || r.spawnsPrepared) return;
-        int count = 4 + rng.nextInt(4);
+        int count = 6 + rng.nextInt(5);
         int attempts = 0;
         while (r.enemySpawns.size() < count && attempts++ < count * 40) {
             int tx = 2 + rng.nextInt(COLS - 4);
@@ -541,9 +579,120 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             EnemySpawn spawn = new EnemySpawn();
             spawn.x = px;
             spawn.y = py;
+            spawn.type = chooseEnemyType(r.enemySpawns.size());
             r.enemySpawns.add(spawn);
         }
         r.spawnsPrepared = true;
+    }
+
+    private void ensureRoomTheme(Room room) {
+        if (room == null) {
+            return;
+        }
+        if (room.floorThemeSeed == 0) {
+            room.floorThemeSeed = secureRandom.nextInt(10_000);
+        }
+        if (room.wallThemeSeed == 0) {
+            room.wallThemeSeed = secureRandom.nextInt(10_000);
+        }
+    }
+
+    private void normalizeEnemyState(Room room) {
+        if (room == null) {
+            return;
+        }
+        if (room.enemySpawns != null) {
+            for (EnemySpawn spawn : room.enemySpawns) {
+                if (spawn != null && spawn.type == null) {
+                    spawn.type = EnemyType.ZOMBIE;
+                }
+            }
+        }
+        if (room.enemies != null) {
+            for (Enemy enemy : room.enemies) {
+                if (enemy == null) {
+                    continue;
+                }
+                if (enemy.type == null) {
+                    enemy.type = EnemyType.ZOMBIE;
+                }
+                if (enemy.maxHealth <= 0) {
+                    enemy.type = enemy.type == null ? EnemyType.ZOMBIE : enemy.type;
+                    applyEnemyDefaults(enemy);
+                } else {
+                    enemy.health = Math.max(1, enemy.health <= 0 ? enemy.maxHealth : Math.min(enemy.maxHealth, enemy.health));
+                    enemy.damageBuffer = Math.max(0.0, enemy.damageBuffer);
+                }
+            }
+        }
+    }
+
+    private Enemy instantiateEnemyFromSpawn(EnemySpawn spawn) {
+        Enemy e = new Enemy();
+        e.x = spawn.x;
+        e.y = spawn.y;
+        e.cd = rng.nextInt(45);
+        e.spawn = spawn;
+        e.type = spawn.type == null ? EnemyType.ZOMBIE : spawn.type;
+        applyEnemyDefaults(e);
+        return e;
+    }
+
+    private void applyEnemyDefaults(Enemy enemy) {
+        switch (enemy.type) {
+            case ZOMBIE -> {
+                enemy.size = (int) (TILE * 0.68);
+                enemy.maxHealth = 3;
+            }
+            case IMP -> {
+                enemy.size = (int) (TILE * 0.6);
+                enemy.maxHealth = 2;
+            }
+            case KNIGHT -> {
+                enemy.size = (int) (TILE * 0.7);
+                enemy.maxHealth = 6;
+                enemy.braceTicks = 0;
+            }
+            case OGRE -> {
+                enemy.size = (int) (TILE * 0.82);
+                enemy.maxHealth = 7;
+            }
+            case PUMPKIN -> {
+                enemy.size = (int) (TILE * 0.6);
+                enemy.maxHealth = 3;
+            }
+            case SKELETON -> {
+                enemy.size = (int) (TILE * 0.62);
+                enemy.maxHealth = 2;
+            }
+            case WIZARD -> {
+                enemy.size = (int) (TILE * 0.7);
+                enemy.maxHealth = 4;
+            }
+        }
+        enemy.health = enemy.maxHealth;
+        enemy.damageBuffer = 0.0;
+        enemy.patternIndex = rng.nextInt(3);
+    }
+
+    private EnemyType chooseEnemyType(int index) {
+        EnemyType[] bag = {
+                EnemyType.ZOMBIE,
+                EnemyType.IMP,
+                EnemyType.KNIGHT,
+                EnemyType.OGRE,
+                EnemyType.PUMPKIN,
+                EnemyType.SKELETON,
+                EnemyType.WIZARD,
+                EnemyType.ZOMBIE,
+                EnemyType.SKELETON,
+                EnemyType.IMP,
+                EnemyType.PUMPKIN
+        };
+        if (index < bag.length) {
+            return bag[index];
+        }
+        return bag[rng.nextInt(bag.length)];
     }
 
     private boolean isBossRoom(Point pos) {
@@ -572,82 +721,395 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int pcy = player.y + player.height/2;
 
         for (Enemy e : room.enemies) {
-            if (!e.alive) continue;
-            int dx = pcx - e.x;
-            int dy = pcy - e.y;
-            double len = Math.hypot(dx, dy);
-            if (len > 1) {
-                double speed = 0.9;
-                int mx = (int)Math.round(dx/len * speed);
-                int my = (int)Math.round(dy/len * speed);
-                attemptEnemyMove(e, mx, 0);
-                attemptEnemyMove(e, 0, my);
+            if (!e.alive) {
+                continue;
             }
-            if (e.cd-- <= 0) {
-                double spd = 3.75;
-                Bullet b = new Bullet();
-                b.x = e.x; b.y = e.y;
-                double l = Math.max(1e-6, Math.hypot(dx, dy));
-                b.vx = dx / l * spd;
-                b.vy = dy / l * spd;
-                b.r = ENEMY_PROJECTILE_RADIUS;
-                bullets.add(b);
-                e.cd = 60 + rng.nextInt(40);
-            }
+            updateEnemyBehavior(e, pcx, pcy);
         }
 
+        updateEnemyProjectiles(pcx, pcy);
+        updatePlayerProjectiles();
+        room.enemies.removeIf(e -> !e.alive);
+        updateRoomClearState(room);
+
+        for (Explosion ex : explosions) {
+            ex.age++;
+        }
+        explosions.removeIf(ex -> ex.age >= ex.life);
+    }
+
+    private void updateEnemyBehavior(Enemy enemy, int pcx, int pcy) {
+        if (enemy == null || !enemy.alive) {
+            return;
+        }
+        if (enemy.cd > 0) {
+            enemy.cd--;
+        }
+        if (enemy.braceTicks > 0) {
+            enemy.braceTicks--;
+        }
+
+        double distance = Math.hypot(pcx - enemy.x, pcy - enemy.y);
+        switch (enemy.type) {
+            case ZOMBIE -> {
+                moveEnemyToward(enemy, pcx, pcy, 0.75);
+                attemptMeleeStrike(enemy, enemy.size * 0.65, 1.0, 55);
+            }
+            case IMP -> {
+                double minRange = TILE * 3.0;
+                double maxRange = TILE * 6.5;
+                if (distance < minRange) {
+                    moveEnemyAway(enemy, pcx, pcy, 0.9);
+                } else if (distance > maxRange) {
+                    moveEnemyToward(enemy, pcx, pcy, 0.72);
+                } else {
+                    strafeEnemy(enemy, pcx, pcy, 0.6, (enemy.patternIndex & 1) == 0);
+                }
+                if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    spawnEnemyProjectile(enemy, pcx, pcy, 4.4, 1.0, 5, false,
+                            new Color(210, 186, 120), false, 0, 0);
+                    enemy.cd = 60 + rng.nextInt(20);
+                }
+            }
+            case KNIGHT -> {
+                boolean los = hasLineOfSight(enemy.x, enemy.y, pcx, pcy);
+                if (los) {
+                    enemy.braceTicks = Math.min(90, enemy.braceTicks + 6);
+                }
+                moveEnemyToward(enemy, pcx, pcy, 0.52);
+                attemptMeleeStrike(enemy, enemy.size * 0.7, 1.2, 70);
+            }
+            case OGRE -> {
+                if (enemy.windup > 0) {
+                    enemy.windup--;
+                    if (enemy.windup == 0) {
+                        if (player != null && intersectsCircleRect(enemy.x, enemy.y, TILE * 1.2, player)) {
+                            applyPlayerDamage(2.0);
+                        }
+                        explosions.add(makeExplosion(enemy.x, enemy.y, 24, 36,
+                                new Color(255, 156, 110), new Color(255, 216, 170)));
+                    }
+                    return;
+                }
+                moveEnemyToward(enemy, pcx, pcy, 0.6);
+                if (distance < TILE * 1.3 && enemy.cd <= 0) {
+                    enemy.windup = 18;
+                    enemy.cd = 80;
+                }
+            }
+            case PUMPKIN -> {
+                double minRange = TILE * 4.0;
+                double maxRange = TILE * 7.0;
+                if (distance < minRange) {
+                    moveEnemyAway(enemy, pcx, pcy, 0.82);
+                } else if (distance > maxRange) {
+                    moveEnemyToward(enemy, pcx, pcy, 0.7);
+                } else {
+                    strafeEnemy(enemy, pcx, pcy, 0.58, (enemy.patternIndex & 1) == 1);
+                }
+                if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    spawnEnemyProjectile(enemy, pcx, pcy, 2.8, 1.1, 7, false,
+                            new Color(255, 138, 56), true, 40, 32);
+                    enemy.cd = 95 + rng.nextInt(30);
+                }
+            }
+            case SKELETON -> {
+                moveEnemyToward(enemy, pcx, pcy, 1.15);
+                attemptMeleeStrike(enemy, enemy.size * 0.6, 1.0, 40);
+            }
+            case WIZARD -> {
+                double minRange = TILE * 4.5;
+                double maxRange = TILE * 7.8;
+                if (distance < minRange) {
+                    moveEnemyAway(enemy, pcx, pcy, 0.8);
+                } else if (distance > maxRange) {
+                    moveEnemyToward(enemy, pcx, pcy, 0.68);
+                } else {
+                    strafeEnemy(enemy, pcx, pcy, 0.64, (enemy.patternIndex & 1) == 0);
+                }
+                if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    castWizardPattern(enemy, pcx, pcy);
+                    enemy.cd = 80 + rng.nextInt(40);
+                }
+            }
+        }
+    }
+
+    private void updateEnemyProjectiles(int pcx, int pcy) {
         for (Bullet b : bullets) {
-            if (!b.alive) continue;
+            if (!b.alive) {
+                continue;
+            }
             b.x += b.vx;
             b.y += b.vy;
-            if (b.x < 0 || b.y < 0 || b.x >= COLS*TILE || b.y >= ROWS*TILE) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); continue; }
-            int tx = (int)(b.x) / TILE;
-            int ty = (int)(b.y) / TILE;
-            if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) {
-                if (room.g[tx][ty] == T.WALL) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); }
+            b.life++;
+            if (b.life > b.maxLife) {
+                b.alive = false;
             }
-            // Player hit detection (circle vs rect)
-            if (player != null && intersectsCircleRect(b.x, b.y, b.r, player)) {
-                if (iFrames == 0) {
-                    playerHP = Math.max(0, playerHP - 1);
-                    iFrames = 40;
-                    if (playerHP <= 0) onPlayerDeath();
+            if (!b.alive) {
+                continue;
+            }
+            if (b.x < 0 || b.y < 0 || b.x >= COLS * TILE || b.y >= ROWS * TILE) {
+                b.alive = false;
+                resolveBulletImpact(b);
+                continue;
+            }
+            int tx = (int) (b.x) / TILE;
+            int ty = (int) (b.y) / TILE;
+            if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) {
+                if (room.g[tx][ty] == T.WALL) {
+                    b.alive = false;
+                    resolveBulletImpact(b);
+                    continue;
                 }
-                b.alive = false; explosions.add(makeExplosion(b.x, b.y));
+            }
+            if (player != null && intersectsCircleRect(b.x, b.y, Math.max(2, b.r), player)) {
+                applyPlayerDamage(b.damage);
+                b.alive = false;
+                resolveBulletImpact(b);
             }
         }
         bullets.removeIf(bb -> !bb.alive);
+    }
 
-        // Player bullets
+    private void updatePlayerProjectiles() {
         for (Bullet b : playerBullets) {
-            if (!b.alive) continue;
+            if (!b.alive) {
+                continue;
+            }
             b.x += b.vx;
             b.y += b.vy;
-            if (b.x < 0 || b.y < 0 || b.x >= COLS*TILE || b.y >= ROWS*TILE) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); continue; }
-            int tx = (int)(b.x) / TILE;
-            int ty = (int)(b.y) / TILE;
-            if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) {
-                if (room.g[tx][ty] == T.WALL) { b.alive = false; explosions.add(makeExplosion(b.x, b.y)); continue; }
+            b.life++;
+            if (b.life > b.maxLife) {
+                b.alive = false;
             }
-            // enemy collision (circle vs enemy AABB simplified)
-            for (Enemy e : room.enemies) {
-                if (!b.alive) break;
-                if (!e.alive) continue;
-                int ex0 = e.x - e.size/2, ey0 = e.y - e.size/2;
-                int ex1 = ex0 + e.size, ey1 = ey0 + e.size;
+            if (!b.alive) {
+                continue;
+            }
+            if (b.x < 0 || b.y < 0 || b.x >= COLS * TILE || b.y >= ROWS * TILE) {
+                b.alive = false;
+                resolvePlayerProjectileImpact(b);
+                continue;
+            }
+            int tx = (int) (b.x) / TILE;
+            int ty = (int) (b.y) / TILE;
+            if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS) {
+                if (room.g[tx][ty] == T.WALL) {
+                    b.alive = false;
+                    resolvePlayerProjectileImpact(b);
+                    continue;
+                }
+            }
+            for (Enemy enemy : room.enemies) {
+                if (!enemy.alive || !b.alive) {
+                    continue;
+                }
+                int ex0 = enemy.x - enemy.size / 2;
+                int ey0 = enemy.y - enemy.size / 2;
+                int ex1 = ex0 + enemy.size;
+                int ey1 = ey0 + enemy.size;
                 if (b.x >= ex0 && b.x <= ex1 && b.y >= ey0 && b.y <= ey1) {
-                    b.alive = false; explosions.add(makeExplosion(b.x, b.y));
-                    eliminateEnemy(room, e);
+                    b.alive = false;
+                    resolvePlayerProjectileImpact(b);
+                    applyDamageToEnemy(enemy, b.damage);
                 }
             }
         }
         playerBullets.removeIf(bb -> !bb.alive);
-        room.enemies.removeIf(e -> !e.alive);
-        updateRoomClearState(room);
+    }
 
-        // explosions advance
-        for (Explosion ex : explosions) ex.age++;
-        explosions.removeIf(ex -> ex.age >= ex.life);
+    private void resolveBulletImpact(Bullet b) {
+        if (b.explosive) {
+            int radius = b.explosionRadius > 0 ? b.explosionRadius : 30;
+            int life = b.explosionLife > 0 ? b.explosionLife : 24;
+            Color inner = b.tint != null ? b.tint : new Color(255, 180, 110);
+            Color outer = inner.brighter();
+            explosions.add(makeExplosion(b.x, b.y, life, radius, inner, outer));
+        } else {
+            explosions.add(makeExplosion(b.x, b.y));
+        }
+    }
+
+    private void resolvePlayerProjectileImpact(Bullet b) {
+        explosions.add(makeExplosion(b.x, b.y, 16, 18,
+                new Color(200, 240, 255), new Color(150, 210, 255)));
+    }
+
+    private void attemptMeleeStrike(Enemy enemy, double range, double damage, int cooldown) {
+        if (enemy.cd > 0) {
+            return;
+        }
+        if (player != null && intersectsCircleRect(enemy.x, enemy.y, range, player)) {
+            applyPlayerDamage(damage);
+            enemy.cd = cooldown;
+        }
+    }
+
+    private void applyPlayerDamage(double damage) {
+        if (player == null || damage <= 0) {
+            return;
+        }
+        if (iFrames > 0) {
+            return;
+        }
+        playerDamageBuffer += damage;
+        int whole = (int) Math.floor(playerDamageBuffer);
+        if (whole <= 0) {
+            return;
+        }
+        playerDamageBuffer -= whole;
+        playerHP = Math.max(0, playerHP - whole);
+        iFrames = 40;
+        if (playerHP <= 0) {
+            onPlayerDeath();
+        }
+    }
+
+    private void applyDamageToEnemy(Enemy enemy, double damage) {
+        if (enemy == null || !enemy.alive || damage <= 0) {
+            return;
+        }
+        double modifier = 1.0;
+        if (enemy.type == EnemyType.KNIGHT && enemy.braceTicks > 0 && player != null &&
+                hasLineOfSight(enemy.x, enemy.y, player.x + player.width / 2, player.y + player.height / 2)) {
+            modifier *= 0.35;
+        }
+        enemy.damageBuffer += damage * modifier;
+        while (enemy.damageBuffer >= 1.0) {
+            enemy.health--;
+            enemy.damageBuffer -= 1.0;
+        }
+        if (enemy.health <= 0) {
+            eliminateEnemy(room, enemy);
+        }
+    }
+
+    private void moveEnemyToward(Enemy enemy, int targetX, int targetY, double speed) {
+        double dx = targetX - enemy.x;
+        double dy = targetY - enemy.y;
+        double len = Math.hypot(dx, dy);
+        if (len < 1e-6) {
+            return;
+        }
+        double normX = dx / len;
+        double normY = dy / len;
+        int mx = (int) Math.round(normX * speed);
+        int my = (int) Math.round(normY * speed);
+        if (mx == 0 && Math.abs(speed) >= 0.45) {
+            mx = speed >= 0 ? (normX >= 0 ? 1 : -1) : (normX >= 0 ? -1 : 1);
+        }
+        if (my == 0 && Math.abs(speed) >= 0.45) {
+            my = speed >= 0 ? (normY >= 0 ? 1 : -1) : (normY >= 0 ? -1 : 1);
+        }
+        if (mx != 0) {
+            attemptEnemyMove(enemy, mx, 0);
+        }
+        if (my != 0) {
+            attemptEnemyMove(enemy, 0, my);
+        }
+    }
+
+    private void moveEnemyAway(Enemy enemy, int targetX, int targetY, double speed) {
+        moveEnemyToward(enemy, targetX, targetY, -speed);
+    }
+
+    private void strafeEnemy(Enemy enemy, int targetX, int targetY, double speed, boolean clockwise) {
+        double dx = targetX - enemy.x;
+        double dy = targetY - enemy.y;
+        double len = Math.hypot(dx, dy);
+        if (len < 1e-6) {
+            return;
+        }
+        double sx = clockwise ? dy / len : -dy / len;
+        double sy = clockwise ? -dx / len : dx / len;
+        int mx = (int) Math.round(sx * speed);
+        int my = (int) Math.round(sy * speed);
+        if (mx == 0 && Math.abs(speed) >= 0.45) {
+            mx = sx >= 0 ? 1 : -1;
+        }
+        if (my == 0 && Math.abs(speed) >= 0.45) {
+            my = sy >= 0 ? 1 : -1;
+        }
+        if (mx != 0) {
+            attemptEnemyMove(enemy, mx, 0);
+        }
+        if (my != 0) {
+            attemptEnemyMove(enemy, 0, my);
+        }
+    }
+
+    private boolean hasLineOfSight(int sx, int sy, int tx, int ty) {
+        if (room == null) {
+            return false;
+        }
+        double dx = tx - sx;
+        double dy = ty - sy;
+        double distance = Math.hypot(dx, dy);
+        int steps = Math.max(1, (int) Math.ceil(distance / (TILE / 2.0)));
+        double stepX = dx / steps;
+        double stepY = dy / steps;
+        double cx = sx;
+        double cy = sy;
+        for (int i = 0; i <= steps; i++) {
+            int ix = Math.max(0, Math.min(COLS - 1, (int) (cx / TILE)));
+            int iy = Math.max(0, Math.min(ROWS - 1, (int) (cy / TILE)));
+            if (room.g[ix][iy] == T.WALL) {
+                return false;
+            }
+            cx += stepX;
+            cy += stepY;
+        }
+        return true;
+    }
+
+    private void castWizardPattern(Enemy enemy, int pcx, int pcy) {
+        double baseAngle = Math.atan2(pcy - enemy.y, pcx - enemy.x);
+        int pattern = enemy.patternIndex % 3;
+        switch (pattern) {
+            case 0 -> {
+                spawnEnemyProjectileAngle(enemy, baseAngle, 4.6, 1.0, 5, true, null, false, 0, 0);
+                spawnEnemyProjectileAngle(enemy, baseAngle + 0.25, 4.4, 1.0, 5, true, null, false, 0, 0);
+                spawnEnemyProjectileAngle(enemy, baseAngle - 0.25, 4.4, 1.0, 5, true, null, false, 0, 0);
+            }
+            case 1 -> spawnEnemyProjectileAngle(enemy, baseAngle, 3.1, 1.4, 7, false,
+                    new Color(130, 192, 255), true, 36, 34);
+            case 2 -> {
+                spawnEnemyProjectileAngle(enemy, baseAngle, 5.4, 0.8, 4, false,
+                        new Color(230, 140, 255), false, 0, 0);
+                spawnEnemyProjectileAngle(enemy, baseAngle + 0.12, 5.0, 0.8, 4, false,
+                        new Color(255, 180, 120), false, 0, 0);
+            }
+        }
+        enemy.patternIndex = (enemy.patternIndex + 1) % 6;
+    }
+
+    private void spawnEnemyProjectile(Enemy shooter, double targetX, double targetY, double speed,
+                                      double damage, int radius, boolean useTexture, Color tint,
+                                      boolean explosive, int explosionRadius, int explosionLife) {
+        if (shooter == null) {
+            return;
+        }
+        double angle = Math.atan2(targetY - shooter.y, targetX - shooter.x);
+        spawnEnemyProjectileAngle(shooter, angle, speed, damage, radius, useTexture, tint, explosive, explosionRadius, explosionLife);
+    }
+
+    private void spawnEnemyProjectileAngle(Enemy shooter, double angle, double speed, double damage,
+                                           int radius, boolean useTexture, Color tint,
+                                           boolean explosive, int explosionRadius, int explosionLife) {
+        Bullet b = new Bullet();
+        b.x = shooter.x;
+        b.y = shooter.y;
+        b.vx = Math.cos(angle) * speed;
+        b.vy = Math.sin(angle) * speed;
+        b.r = radius <= 0 ? ENEMY_PROJECTILE_RADIUS : radius;
+        b.damage = Math.max(0.25, damage);
+        b.maxLife = 520;
+        b.useTexture = useTexture;
+        b.tint = tint;
+        b.explosive = explosive;
+        b.explosionRadius = explosionRadius;
+        b.explosionLife = explosionLife;
+        bullets.add(b);
     }
 
     private void eliminateEnemy(Room r, Enemy enemy) {
@@ -782,8 +1244,23 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private Explosion makeExplosion(double x, double y) {
+        return makeExplosion(x, y, 18, 22,
+                new Color(255, 200, 80),
+                new Color(255, 240, 160));
+    }
+
+    private Explosion makeExplosion(double x, double y, int life, int radius, Color inner, Color outer) {
         Explosion ex = new Explosion();
-        ex.x = x; ex.y = y;
+        ex.x = x;
+        ex.y = y;
+        ex.life = life;
+        ex.maxR = radius;
+        if (inner != null) {
+            ex.inner = inner;
+        }
+        if (outer != null) {
+            ex.outer = outer;
+        }
         return ex;
     }
 
@@ -792,6 +1269,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             // Respawn at origin room with full HP and brief invulnerability
             playerHP = MAX_PLAYER_HP;
             iFrames = 60;
+            playerDamageBuffer = 0.0;
             up = down = left = right = false;
             inBoss = false;
             bullets.clear();
@@ -872,6 +1350,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         b.vx = dx / l * spd;
         b.vy = dy / l * spd;
         b.r = PLAYER_PROJECTILE_RADIUS;
+        b.friendly = true;
+        b.damage = 1.0;
+        b.maxLife = 360;
+        b.useTexture = true;
         playerBullets.add(b);
     }
 
@@ -879,6 +1361,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     /** Create a fresh room with outer walls and 1–3 total doors (including the entrance, if any). */
     private Room generateNewRoom(Dir mustHaveEntrance) {
         Room r = new Room();
+        r.floorThemeSeed = secureRandom.nextInt(10_000);
+        r.wallThemeSeed = secureRandom.nextInt(10_000);
 
         // Floor fill and border walls
         for (int x = 0; x < COLS; x++)
@@ -1266,14 +1750,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void drawWorld(Graphics2D gg) {
+        ensureRoomTheme(room);
         for (int x = 0; x < COLS; x++) {
             for (int y = 0; y < ROWS; y++) {
                 int px = x * TILE, py = y * TILE;
                 T t = room.g[x][y];
                 if (textures != null && textures.isReady()) {
                     int fCount = Math.max(1, textures.floorVariants());
-                    int fIdx = Math.floorMod(x * 17 + y * 31, fCount);
-                    int wIdx = 0;
+                    int wCount = Math.max(1, textures.wallVariants());
+                    int fIdx = Math.floorMod(room.floorThemeSeed + x * 17 + y * 31, fCount);
+                    int wIdx = Math.floorMod(room.wallThemeSeed + x * 13 + y * 19, wCount);
                     switch (t) {
                         case FLOOR -> gg.drawImage(textures.floorVariant(fIdx), px, py, TILE, TILE, null);
                         case WALL  -> gg.drawImage(textures.wallVariant(wIdx),  px, py, TILE, TILE, null);
@@ -1370,9 +1856,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             int alpha = (int)(180 * (1.0f - t));
             alpha = Math.max(0, Math.min(255, alpha));
             gg.setComposite(AlphaComposite.SrcOver.derive(alpha/255f));
-            gg.setColor(new Color(255, 200, 80));
+            gg.setColor(ex.inner == null ? new Color(255, 200, 80) : ex.inner);
             gg.fillOval((int)ex.x - r, (int)ex.y - r, r*2, r*2);
-            gg.setColor(new Color(255, 240, 160));
+            gg.setColor(ex.outer == null ? new Color(255, 240, 160) : ex.outer);
             gg.drawOval((int)ex.x - r, (int)ex.y - r, r*2, r*2);
             gg.setComposite(AlphaComposite.SrcOver);
         }
@@ -1733,6 +2219,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 playerBullets,
                 explosions,
                 playerHP,
+                playerDamageBuffer,
                 iFrames,
                 keysHeld,
                 statusMessage,
