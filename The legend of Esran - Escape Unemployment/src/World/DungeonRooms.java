@@ -709,12 +709,24 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
+    private static final EnumSet<EnemyType> MELEE_ENEMIES = EnumSet.of(
+            EnemyType.ZOMBIE,
+            EnemyType.KNIGHT,
+            EnemyType.OGRE
+    );
+    private static final EnumSet<EnemyType> RANGED_ENEMIES = EnumSet.of(
+            EnemyType.IMP,
+            EnemyType.PUMPKIN,
+            EnemyType.SKELETON,
+            EnemyType.WIZARD
+    );
+
     private void initializeEnemySpawns(Room r) {
         if (r == null || r.spawnsPrepared) return;
-        int base = 2 + Math.min(roomsVisited / 4, 3); // 2..5 based on progress
-        int variance = roomsVisited >= 8 ? 2 : 1;
+        int base = 2 + Math.min(roomsVisited / 5, 2); // 2..4 based on progress
+        int variance = Math.min(roomsVisited / 6, 2);
         int count = base + rng.nextInt(variance + 1);
-        count = Math.max(2, Math.min(6, count));
+        count = Math.max(2, Math.min(5, count));
         int attempts = 0;
         while (r.enemySpawns.size() < count && attempts++ < count * 40) {
             int tx = 2 + rng.nextInt(COLS - 4);
@@ -731,7 +743,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             EnemySpawn spawn = new EnemySpawn();
             spawn.x = px;
             spawn.y = py;
-            spawn.type = chooseEnemyType(r.enemySpawns.size());
+            spawn.type = chooseEnemyTypeForRoom(r);
             r.enemySpawns.add(spawn);
         }
         r.spawnsPrepared = true;
@@ -860,24 +872,124 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.facingAngle = 0.0;
     }
 
-    private EnemyType chooseEnemyType(int index) {
-        EnemyType[] bag = {
-                EnemyType.ZOMBIE,
-                EnemyType.IMP,
-                EnemyType.KNIGHT,
-                EnemyType.OGRE,
-                EnemyType.PUMPKIN,
-                EnemyType.SKELETON,
-                EnemyType.WIZARD,
-                EnemyType.ZOMBIE,
-                EnemyType.SKELETON,
-                EnemyType.IMP,
-                EnemyType.PUMPKIN
-        };
-        if (index < bag.length) {
-            return bag[index];
+    private EnemyType chooseEnemyTypeForRoom(Room room) {
+        if (room == null) {
+            return EnemyType.ZOMBIE;
         }
-        return bag[rng.nextInt(bag.length)];
+
+        EnumMap<EnemyType, Integer> counts = new EnumMap<>(EnemyType.class);
+        for (EnemySpawn spawn : room.enemySpawns) {
+            EnemyType type = spawn == null || spawn.type == null ? EnemyType.ZOMBIE : spawn.type;
+            counts.merge(type, 1, Integer::sum);
+        }
+
+        List<EnemyType> pool = buildEnemyPool(counts);
+        if (pool.isEmpty()) {
+            return EnemyType.ZOMBIE;
+        }
+
+        boolean hasMelee = counts.keySet().stream().anyMatch(MELEE_ENEMIES::contains);
+        boolean hasRanged = counts.keySet().stream().anyMatch(RANGED_ENEMIES::contains);
+        if (!hasMelee || !hasRanged) {
+            List<EnemyType> forced = new ArrayList<>();
+            for (EnemyType type : pool) {
+                if (!hasMelee && MELEE_ENEMIES.contains(type)) {
+                    forced.add(type);
+                } else if (!hasRanged && RANGED_ENEMIES.contains(type)) {
+                    forced.add(type);
+                }
+            }
+            if (!forced.isEmpty()) {
+                pool = forced;
+            }
+        }
+
+        EnemyType last = room.enemySpawns.isEmpty() ? null : room.enemySpawns.get(room.enemySpawns.size() - 1).type;
+        if (last != null) {
+            List<EnemyType> nonRepeat = new ArrayList<>();
+            for (EnemyType type : pool) {
+                if (type != last) {
+                    nonRepeat.add(type);
+                }
+            }
+            if (!nonRepeat.isEmpty()) {
+                pool = nonRepeat;
+            }
+        }
+
+        return pool.get(rng.nextInt(pool.size()));
+    }
+
+    private List<EnemyType> buildEnemyPool(Map<EnemyType, Integer> counts) {
+        List<EnemyType> pool = new ArrayList<>();
+        for (EnemyType type : unlockedEnemyTypes()) {
+            int limit = perRoomLimit(type);
+            int current = counts.getOrDefault(type, 0);
+            if (current >= limit) {
+                continue;
+            }
+            int weight = enemySpawnWeight(type);
+            for (int i = 0; i < weight; i++) {
+                pool.add(type);
+            }
+        }
+        return pool;
+    }
+
+    private List<EnemyType> unlockedEnemyTypes() {
+        List<EnemyType> types = new ArrayList<>();
+        types.add(EnemyType.ZOMBIE);
+        if (roomsVisited >= 1) {
+            types.add(EnemyType.IMP);
+        }
+        if (roomsVisited >= 2) {
+            types.add(EnemyType.SKELETON);
+        }
+        if (roomsVisited >= 3) {
+            types.add(EnemyType.PUMPKIN);
+        }
+        if (roomsVisited >= 4) {
+            types.add(EnemyType.KNIGHT);
+        }
+        if (roomsVisited >= 5) {
+            types.add(EnemyType.WIZARD);
+        }
+        if (roomsVisited >= 6) {
+            types.add(EnemyType.OGRE);
+        }
+        return types;
+    }
+
+    private int perRoomLimit(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> 2 + roomsVisited / 10;
+            case IMP, SKELETON, PUMPKIN -> 2;
+            case WIZARD -> roomsVisited >= 8 ? 2 : 1;
+            case KNIGHT -> roomsVisited >= 7 ? 2 : 1;
+            case OGRE -> 1 + roomsVisited / 12;
+        };
+    }
+
+    private int enemySpawnWeight(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> 3;
+            case IMP -> 2;
+            case SKELETON -> roomsVisited >= 3 ? 2 : 1;
+            case PUMPKIN -> roomsVisited >= 4 ? 2 : 1;
+            case KNIGHT -> roomsVisited >= 6 ? 2 : 1;
+            case WIZARD -> roomsVisited >= 7 ? 2 : 1;
+            case OGRE -> roomsVisited >= 8 ? 2 : 1;
+        };
+    }
+
+    private WeaponType weaponFor(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE, KNIGHT -> WeaponType.SWORD;
+            case OGRE -> WeaponType.HAMMER;
+            case PUMPKIN, SKELETON -> WeaponType.BOW;
+            case WIZARD -> WeaponType.STAFF;
+            case IMP -> WeaponType.CLAWS;
+        };
     }
 
     private WeaponType weaponFor(EnemyType type) {
