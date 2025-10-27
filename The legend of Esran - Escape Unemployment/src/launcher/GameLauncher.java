@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
+import security.GameSecurity;
 import util.ResourceLoader;
 
 /**
@@ -94,6 +95,7 @@ public final class GameLauncher {
     private JButton quitButton;
 
     public static void main(String[] args) {
+        GameSecurity.verifyIntegrity();
         SwingUtilities.invokeLater(() -> {
             GameLauncher launcher = new GameLauncher();
             launcher.show();

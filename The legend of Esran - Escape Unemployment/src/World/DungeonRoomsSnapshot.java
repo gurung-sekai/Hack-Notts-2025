@@ -38,6 +38,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final List<DungeonRooms.Bullet> playerBullets;
     private final List<DungeonRooms.Explosion> explosions;
     private final int playerHP;
+    private final double playerDamageBuffer;
     private final int iFrames;
     private final int keysHeld;
     private final String statusMessage;
@@ -65,6 +66,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          List<DungeonRooms.Bullet> playerBullets,
                          List<DungeonRooms.Explosion> explosions,
                          int playerHP,
+                         double playerDamageBuffer,
                          int iFrames,
                          int keysHeld,
                          String statusMessage,
@@ -91,6 +93,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.playerBullets = copyBullets(playerBullets);
         this.explosions = copyExplosions(explosions);
         this.playerHP = playerHP;
+        this.playerDamageBuffer = playerDamageBuffer;
         this.iFrames = iFrames;
         this.keysHeld = keysHeld;
         this.statusMessage = statusMessage;
@@ -167,6 +170,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return playerHP;
     }
 
+    public double playerDamageBuffer() {
+        return playerDamageBuffer;
+    }
+
     public int iFrames() {
         return iFrames;
     }
@@ -233,6 +240,8 @@ public final class DungeonRoomsSnapshot implements Serializable {
         clone.lockedDoors = room.lockedDoors.clone();
         clone.cleared = room.cleared;
         clone.spawnsPrepared = room.spawnsPrepared;
+        clone.floorThemeSeed = room.floorThemeSeed;
+        clone.wallThemeSeed = room.wallThemeSeed;
         return clone;
     }
 
@@ -275,11 +284,19 @@ public final class DungeonRoomsSnapshot implements Serializable {
             e.size = enemy.size;
             e.cd = enemy.cd;
             e.alive = enemy.alive;
+            e.type = enemy.type;
+            e.maxHealth = enemy.maxHealth;
+            e.health = enemy.health;
+            e.braceTicks = enemy.braceTicks;
+            e.windup = enemy.windup;
+            e.patternIndex = enemy.patternIndex;
+            e.damageBuffer = enemy.damageBuffer;
             if (enemy.spawn != null) {
                 DungeonRooms.EnemySpawn spawn = new DungeonRooms.EnemySpawn();
                 spawn.x = enemy.spawn.x;
                 spawn.y = enemy.spawn.y;
                 spawn.defeated = enemy.spawn.defeated;
+                spawn.type = enemy.spawn.type;
                 e.spawn = spawn;
             }
             list.add(e);
@@ -312,6 +329,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
             s.x = spawn.x;
             s.y = spawn.y;
             s.defeated = spawn.defeated;
+            s.type = spawn.type;
             list.add(s);
         }
         return list;
@@ -330,6 +348,15 @@ public final class DungeonRoomsSnapshot implements Serializable {
             b.vy = bullet.vy;
             b.r = bullet.r;
             b.alive = bullet.alive;
+            b.damage = bullet.damage;
+            b.life = bullet.life;
+            b.maxLife = bullet.maxLife;
+            b.friendly = bullet.friendly;
+            b.useTexture = bullet.useTexture;
+            b.tint = bullet.tint;
+            b.explosive = bullet.explosive;
+            b.explosionRadius = bullet.explosionRadius;
+            b.explosionLife = bullet.explosionLife;
             list.add(b);
         }
         return list;
@@ -347,6 +374,8 @@ public final class DungeonRoomsSnapshot implements Serializable {
             ex.age = explosion.age;
             ex.life = explosion.life;
             ex.maxR = explosion.maxR;
+            ex.inner = explosion.inner;
+            ex.outer = explosion.outer;
             list.add(ex);
         }
         return list;
