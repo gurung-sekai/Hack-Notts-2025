@@ -663,7 +663,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             r = generateNewRoom(mustHaveEntrance);
             configureLocksForNewRoom(pos, r, mustHaveEntrance);
             world.put(new Point(pos), r); // store a copy of key to avoid mutation issues
-            spawnEnemiesIfNeeded(pos, r);
+            ensureRoomTheme(r);
+            normalizeEnemyState(r);
             return r;
         }
         // Ensure the entrance exists if we’re entering from a new side later
@@ -992,16 +993,6 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         };
     }
 
-    private WeaponType weaponFor(EnemyType type) {
-        return switch (type) {
-            case ZOMBIE, KNIGHT -> WeaponType.SWORD;
-            case OGRE -> WeaponType.HAMMER;
-            case PUMPKIN, SKELETON -> WeaponType.BOW;
-            case WIZARD -> WeaponType.STAFF;
-            case IMP -> WeaponType.CLAWS;
-        };
-    }
-
     private boolean isBossRoom(Point pos) {
         BossEncounter encounter = bossEncounters.get(pos);
         return encounter != null && !encounter.defeated;
@@ -1293,6 +1284,40 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
+    }
+
+    private void triggerMeleeSwing(Enemy enemy) {
+        if (enemy == null) {
+            return;
+        }
+        if (enemy.weapon != WeaponType.SWORD && enemy.weapon != WeaponType.HAMMER) {
+            return;
+        }
+        int duration = enemy.weapon == WeaponType.HAMMER ? 26 : 16;
+        enemy.attackAnimDuration = duration;
+        enemy.attackAnimTicks = duration;
+        enemy.weaponAngle = enemy.facingAngle;
+    }
+
+    private void startBowDraw(Enemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(Enemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
     }
 
     private void triggerMeleeSwing(Enemy enemy) {
@@ -1635,7 +1660,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void initializeBossPool() {
         bossPool.clear();
-        Collections.addAll(bossPool, BossBattlePanel.BossKind.values());
+        for (BossBattlePanel.BossKind kind : BossBattlePanel.BossKind.values()) {
+            if (BossBattlePanel.hasDedicatedAssets(kind)) {
+                bossPool.add(kind);
+            }
+        }
+        if (bossPool.isEmpty()) {
+            Collections.addAll(bossPool, BossBattlePanel.BossKind.values());
+        }
         Collections.shuffle(bossPool, secureRandom);
     }
 
@@ -2079,6 +2111,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 showMessage(texts.text("boss_unlock", formatBossName(encounter.kind)));
             }
         }
+
+        spawnEnemiesIfNeeded(worldPos, room);
 
         checkForBossEncounter();
     }

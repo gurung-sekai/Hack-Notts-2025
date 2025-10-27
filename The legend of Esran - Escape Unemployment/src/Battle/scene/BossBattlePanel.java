@@ -56,6 +56,25 @@ public class BossBattlePanel extends JPanel {
     }
     public enum Outcome { HERO_WIN, HERO_LOSS }
 
+    public static boolean hasDedicatedAssets(BossKind kind) {
+        return switch (kind) {
+            case BIG_ZOMBIE -> hasBossDirectory("dreadHusk");
+            case OGRE_WARLORD -> hasBossDirectory("ogreWarlord");
+            case SKELETON_LORD -> hasBossDirectory("skeletonLord");
+            case PUMPKIN_KING -> hasBossDirectory("pumpkinKing");
+            case IMP_OVERLORD -> hasBossDirectory("impOverlord");
+            case WIZARD_ARCHON -> hasBossDirectory("wizardArchon");
+            case GOLLUM -> hasBossDirectory("Gollum");
+            case GRIM -> hasBossDirectory("Grim");
+            case FIRE_FLINGER -> hasBossDirectory("fireFlinger");
+            case GOLD_MECH -> hasBossDirectory("goldMech");
+            case GOLDEN_KNIGHT -> hasBossDirectory("goldenKnight");
+            case PURPLE_EMPRESS -> hasBossDirectory("purpleEmpress");
+            case THE_WELCH -> hasBossDirectory("theWelch");
+            case TOXIC_TREE -> hasBossDirectory("toxicTree");
+        };
+    }
+
     public static BossBattlePanel create(BossKind kind, Consumer<Outcome> onEnd) {
         HeroDefinition hero = HeroDefinition.defaultHero();
         BossDefinition boss = BossDefinition.of(kind);
@@ -842,6 +861,13 @@ public class BossBattlePanel extends JPanel {
         BufferedImage[] upscaled = upscaleFrames(fallbackFrames, FALLBACK_UPSCALE_FACTOR);
         SpriteSource source = sprite -> sprite.add(AnimatedSprite.State.IDLE, upscaled);
         return new SpriteChoice(source, FALLBACK_UPSCALE_FACTOR);
+    }
+
+    private static boolean hasBossDirectory(String directoryKey) {
+        if (directoryKey == null || directoryKey.isBlank()) {
+            return false;
+        }
+        return !ResourceLoader.listPng("/resources/bosses/" + directoryKey).isEmpty();
     }
 
     private static BufferedImage[] upscaleFrames(BufferedImage[] frames, double factor) {
