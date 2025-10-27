@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -17,6 +18,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import util.ProjectDirectories;
 
 /**
  * Represents the parsed contents of {@code security/integrity.manifest}.
@@ -48,16 +51,21 @@ public final class IntegrityManifest {
     public static IntegrityManifest load(String resourcePath) {
         Objects.requireNonNull(resourcePath, "resourcePath");
         try (InputStream in = IntegrityManifest.class.getResourceAsStream(resourcePath)) {
-            if (in == null) {
-                LOGGER.log(Level.WARNING, "GameSecurity: integrity manifest {0} not found on classpath", resourcePath);
-                return missing();
+            if (in != null) {
+                byte[] data = in.readAllBytes();
+                return fromBytesInternal(data, true);
             }
-            byte[] data = in.readAllBytes();
-            return fromBytesInternal(data, true);
         } catch (IOException ex) {
             LOGGER.log(Level.SEVERE, "GameSecurity: unable to read integrity manifest " + resourcePath, ex);
-            return missing();
         }
+
+        byte[] fallback = loadFromSearchRoots(resourcePath);
+        if (fallback != null) {
+            return fromBytesInternal(fallback, true);
+        }
+
+        LOGGER.log(Level.WARNING, "GameSecurity: integrity manifest {0} not found on classpath or filesystem", resourcePath);
+        return missing();
     }
 
     /**
@@ -179,5 +187,36 @@ public final class IntegrityManifest {
     }
 
     private record ParseResult(Map<Path, String> entries, String pinnedDigest) {
+    }
+
+    private static byte[] loadFromSearchRoots(String resourcePath) {
+        String normalized = normalizeResourcePath(resourcePath);
+        for (Path root : ProjectDirectories.locateSearchRoots()) {
+            byte[] direct = readCandidate(root.resolve(normalized));
+            if (direct != null) {
+                return direct;
+            }
+            byte[] fromResources = readCandidate(root.resolve("resources").resolve(normalized));
+            if (fromResources != null) {
+                return fromResources;
+            }
+        }
+        return null;
+    }
+
+    private static String normalizeResourcePath(String resourcePath) {
+        return resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
+    }
+
+    private static byte[] readCandidate(Path candidate) {
+        if (!Files.isRegularFile(candidate)) {
+            return null;
+        }
+        try {
+            return Files.readAllBytes(candidate);
+        } catch (IOException ex) {
+            LOGGER.log(Level.SEVERE, "GameSecurity: unable to read integrity manifest " + candidate, ex);
+            return null;
+        }
     }
 }

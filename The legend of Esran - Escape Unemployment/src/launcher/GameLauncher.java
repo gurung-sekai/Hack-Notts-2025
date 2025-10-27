@@ -48,6 +48,8 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 import security.GameSecurity;
+import security.integrity.IntegrityCheckReport;
+import security.integrity.IntegrityCheckStatus;
 import util.ResourceLoader;
 
 /**
@@ -93,6 +95,7 @@ public final class GameLauncher {
     private final Map<ControlAction, JButton> controlButtons = new EnumMap<>(ControlAction.class);
     private JButton resumeButton;
     private JButton quitButton;
+    private final IntegrityCheckReport integrityReport;
 
     public static void main(String[] args) {
         GameSecurity.verifyIntegrity();
@@ -107,6 +110,7 @@ public final class GameLauncher {
         settingsPersistence = new SettingsPersistence(storageDir);
         saveManager = new SaveManager(storageDir);
         settings = settingsPersistence.load().orElseGet(GameSettings::new);
+        integrityReport = GameSecurity.verifyIntegrity();
     }
 
     private void show() {
@@ -147,6 +151,8 @@ public final class GameLauncher {
                 JComponent.WHEN_IN_FOCUSED_WINDOW);
 
         showMenuCard();
+
+        SwingUtilities.invokeLater(this::reportIntegrityOutcome);
     }
 
     private JPanel buildMenuCard() {
@@ -407,6 +413,41 @@ public final class GameLauncher {
             fullscreenDevice.setFullScreenWindow(null);
         }
         fullscreenDevice = null;
+    }
+
+    private void reportIntegrityOutcome() {
+        if (frame == null || integrityReport == null) {
+            return;
+        }
+
+        IntegrityCheckStatus status = integrityReport.status();
+        switch (status) {
+            case VERIFIED, SKIPPED_ALREADY_VERIFIED -> {
+                return;
+            }
+            case VERIFIED_WITH_FAILURES -> {
+                StringBuilder builder = new StringBuilder();
+                builder.append("The launcher detected modified or missing files:\n\n");
+                integrityReport.failedEntries().stream()
+                        .limit(5)
+                        .forEach(path -> builder.append(" • ").append(path).append('\n'));
+                if (integrityReport.failedEntries().size() > 5) {
+                    builder.append('\n').append("Additional files were also affected.");
+                }
+                builder.append("\nPlease reinstall or verify your game files to restore integrity checks.");
+                JOptionPane.showMessageDialog(frame, builder.toString(),
+                        "Security warning", JOptionPane.WARNING_MESSAGE);
+            }
+            case SKIPPED_MANIFEST_MISSING -> JOptionPane.showMessageDialog(frame,
+                    "The security manifest could not be found. Runtime checks were skipped.",
+                    "Security warning", JOptionPane.WARNING_MESSAGE);
+            case SKIPPED_MANIFEST_UNTRUSTED -> JOptionPane.showMessageDialog(frame,
+                    "The security manifest failed validation and was ignored. Runtime checks were skipped.",
+                    "Security warning", JOptionPane.ERROR_MESSAGE);
+            case SKIPPED_NO_ENTRIES -> JOptionPane.showMessageDialog(frame,
+                    "The security manifest did not contain any entries. Runtime checks were skipped.",
+                    "Security notice", JOptionPane.INFORMATION_MESSAGE);
+        }
     }
 
     private void shutdownCurrentGame() {
