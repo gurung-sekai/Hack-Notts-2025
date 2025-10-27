@@ -8,7 +8,6 @@ import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
-import java.awt.Paint;
 import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
 import java.awt.geom.Point2D;
@@ -51,8 +50,8 @@ public final class CutsceneBackgrounds {
     public static AnimatedBackdrop dungeonCaptivity() {
         return cachedSequence("dungeonCaptivity", CutsceneBackgrounds::proceduralPrison, 6,
                 "/resources/Cutscene/Dungeon",
-                "/resources/Princess/backgrounds",
-                "/resources/Princess");
+                "/resources/sprites/Princess/backgrounds",
+                "/resources/sprites/Princess");
     }
 
     /** Backwards compatible alias. */

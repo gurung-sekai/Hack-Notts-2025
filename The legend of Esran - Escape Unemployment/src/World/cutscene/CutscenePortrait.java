@@ -28,7 +28,7 @@ public enum CutscenePortrait {
     PURPLE_EMPRESS(null, "/resources/bosses/purpleEmpress", 240),
     THE_WELCH(null, "/resources/bosses/theWelch", 240),
     TOXIC_TREE(null, "/resources/bosses/toxicTree", 240),
-    PRINCESS(null, "/resources/Princess", 220),
+    PRINCESS(null, "/resources/sprites/Princess", 220),
     SHOPKEEPER("resources/sprites/Wizard/wizzard_m_idle_anim_f0.png", "/resources/Shop", 200);
 
     private static final Map<CutscenePortrait, BufferedImage> CACHE = new EnumMap<>(CutscenePortrait.class);
