@@ -992,6 +992,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         };
     }
 
+    private WeaponType weaponFor(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE, KNIGHT -> WeaponType.SWORD;
+            case OGRE -> WeaponType.HAMMER;
+            case PUMPKIN, SKELETON -> WeaponType.BOW;
+            case WIZARD -> WeaponType.STAFF;
+            case IMP -> WeaponType.CLAWS;
+        };
+    }
+
     private boolean isBossRoom(Point pos) {
         BossEncounter encounter = bossEncounters.get(pos);
         return encounter != null && !encounter.defeated;
