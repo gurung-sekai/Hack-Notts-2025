@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -40,26 +41,85 @@ public class AnimatedSprite {
     }
 
     /** Load frames from a classpath prefix: /path/name_f  -> name_f0.png ... */
-    public void addFromPrefix(State s, String resourcePrefix) {
-        ArrayList<BufferedImage> list = new ArrayList<>();
-        for (int k = 0; k < 64; k++) {
-            String path = resourcePrefix + k + ".png";
-            try (InputStream is = ResourceLoader.open(path)) {
-                if (is == null) break;
-                list.add(ImageIO.read(is));
-            } catch (IOException ex) {
-                System.err.println("Failed to load anim frame: " + path + " -> " + ex.getMessage());
-                break;
-            }
+    public boolean addFromPrefix(State s, String resourcePrefix) {
+        BufferedImage[] frames = loadFramesFromPrefix(resourcePrefix);
+        if (frames.length == 0) {
+            return false;
         }
-        if (!list.isEmpty()) {
-            add(s, list.toArray(new BufferedImage[0]));
-        }
+        add(s, frames);
+        return true;
     }
 
     /** Slice an irregular sheet using {@link SpriteSheetSlicer}. */
     public void addFromSheet(State state, String resourcePath) {
         addFromSheet(state, resourcePath, SpriteSheetSlicer.Options.DEFAULT);
+    }
+
+    /** Attempt to load a frame sequence with flexible numbering (0/1-based, padded). */
+    public static BufferedImage[] loadFramesFromPrefix(String resourcePrefix) {
+        return loadFramesFromPrefix(resourcePrefix, 128);
+    }
+
+    private static BufferedImage[] loadFramesFromPrefix(String resourcePrefix, int maxFrames) {
+        if (resourcePrefix == null || resourcePrefix.isBlank()) {
+            return new BufferedImage[0];
+        }
+
+        int[] starts = {0, 1};
+        int[] padWidths = {0, 2, 3};
+        for (int start : starts) {
+            for (int pad : padWidths) {
+                BufferedImage[] attempt = loadSequence(resourcePrefix, start, pad, maxFrames);
+                if (attempt.length > 0) {
+                    return attempt;
+                }
+            }
+        }
+        return new BufferedImage[0];
+    }
+
+    private static BufferedImage[] loadSequence(String resourcePrefix, int startIndex, int padWidth, int maxFrames) {
+        ArrayList<BufferedImage> frames = new ArrayList<>();
+        int limit = Math.max(1, maxFrames);
+        for (int idx = startIndex; idx < startIndex + limit; idx++) {
+            String suffix = formatIndex(idx, padWidth);
+            BufferedImage frame = readFrame(resourcePrefix + suffix);
+            if (frame == null) {
+                if (frames.isEmpty()) {
+                    return new BufferedImage[0];
+                }
+                break;
+            }
+            frames.add(frame);
+        }
+        return frames.toArray(new BufferedImage[0]);
+    }
+
+    private static String formatIndex(int idx, int padWidth) {
+        if (padWidth <= 1) {
+            return String.valueOf(idx);
+        }
+        return String.format(Locale.ROOT, "%0" + padWidth + "d", idx);
+    }
+
+    private static BufferedImage readFrame(String basePath) {
+        String[] extensions = {".png", ".PNG"};
+        for (String ext : extensions) {
+            String path = basePath + ext;
+            try (InputStream is = ResourceLoader.open(path)) {
+                if (is == null) {
+                    continue;
+                }
+                BufferedImage image = ImageIO.read(is);
+                if (image != null) {
+                    return image;
+                }
+            } catch (IOException ex) {
+                System.err.println("Failed to load anim frame: " + path + " -> " + ex.getMessage());
+                return null;
+            }
+        }
+        return null;
     }
 
     /** Slice an irregular sheet using {@link SpriteSheetSlicer}. */

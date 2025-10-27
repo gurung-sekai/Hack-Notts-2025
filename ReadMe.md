@@ -20,6 +20,8 @@ Each dungeon is procedurally generated with randomized obstacles, enemy placemen
 
 > **Windows build note:** If you are working inside a OneDrive-synchronised folder, Gradle will automatically redirect its build output to `%LOCALAPPDATA%\HackNotts\legend-of-esran` to avoid the `Unable to delete directory … build/classes/java/main` error. You can override the location via the `legend.buildDir` Gradle property or the `GRADLE_BUILD_DIR` environment variable when needed.
 
+> **Boss sprite sequences:** Pre-sliced boss frames placed under `src/resources/bosses/<Name>/…` (or similar prefixed directories) are now detected automatically. The game will load those numbered PNGs directly and only fall back to runtime sheet slicing when no split frames are found.
+
 > **Sprite slicing preview:** Run `./gradlew exportSpriteSlices` to regenerate every boss frame under `build/slicerPreview/…` for quick visual inspection outside the game.
 
 > **SpriteSheet AI Extractor:** A dedicated Gradle project under `extractor/` can segment any supplied PNG sheets, preview the overlays, and export Unity/Godot metadata. Run `./gradlew :extractor:run --args="file=../The legend of Esran - Escape Unemployment/src/resources/bosses/attacks/theWelchAttack3.png outDir=./out visualize=true"` to process a single sheet with the JavaFX inspector.
