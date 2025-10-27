@@ -11,25 +11,25 @@ public final class CutsceneLibrary {
     public static CutsceneScript goldenKnightMonologue() {
         return new CutsceneScript(List.of(
                 new CutsceneSlide("Golden Knight",
-                        "Ah, the would-be hero finally crosses the threshold. I have taken the princess to shine beneath my eternal guard.",
+                        "Ah, the would-be hero finally crosses the threshold. The princess glitters beneath my eternal guard now.",
                         CutscenePortrait.GOLDEN_KNIGHT,
-                        CutsceneBackgrounds.emberSwirl()),
+                        CutsceneBackgrounds.goldenThrone()),
+                new CutsceneSlide("Princess",
+                        "HELP ME! His chains are binding me to the dungeon stones!",
+                        CutscenePortrait.PRINCESS,
+                        CutsceneBackgrounds.dungeonCaptivity()),
                 new CutsceneSlide("Hero",
                         "Your tyranny ends tonight, Golden Knight. Release her and face justice!",
                         CutscenePortrait.HERO,
-                        CutsceneBackgrounds.prisonAura()),
+                        CutsceneBackgrounds.heroResolve()),
                 new CutsceneSlide("Golden Knight",
                         "Justice? Ha! Only power decides the realm. Witness the radiance of my gilded armor!",
                         CutscenePortrait.GOLDEN_KNIGHT,
-                        CutsceneBackgrounds.emberSwirl()),
-                new CutsceneSlide("Princess",
-                        "Help me! I'm bound beneath the dungeon wards!",
-                        CutscenePortrait.PRINCESS,
-                        CutsceneBackgrounds.prisonAura()),
+                        CutsceneBackgrounds.goldenThrone()),
                 new CutsceneSlide("Hero",
                         "Hold on, princess! I'll break these chains and end his reign.",
                         CutscenePortrait.HERO,
-                        CutsceneBackgrounds.emberSwirl())
+                        CutsceneBackgrounds.heroResolve())
         ));
     }
 
@@ -38,15 +38,15 @@ public final class CutsceneLibrary {
                 new CutsceneSlide("Princess",
                         "You shattered his arrogance and freed me!",
                         CutscenePortrait.PRINCESS,
-                        CutsceneBackgrounds.royalCelebration()),
+                        CutsceneBackgrounds.victoryCelebration()),
                 new CutsceneSlide("Hero",
                         "No throne can cage hope. Come, let's return to the daylight together.",
                         CutscenePortrait.HERO,
-                        CutsceneBackgrounds.royalCelebration()),
+                        CutsceneBackgrounds.heroResolve()),
                 new CutsceneSlide("Golden Knight",
                         "This is not the end...", // fading words
                         CutscenePortrait.GOLDEN_KNIGHT,
-                        CutsceneBackgrounds.emberSwirl())
+                        CutsceneBackgrounds.goldenThrone())
         ));
     }
 }

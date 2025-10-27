@@ -3,13 +3,17 @@ package gfx;
 import util.ResourceLoader;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -152,6 +156,48 @@ public class AnimatedSprite {
             }
         }
         return frames.toArray(new BufferedImage[0]);
+    }
+
+    /** Attempt to load every frame from a GIF resource. */
+    public static BufferedImage[] loadGifFrames(String resourcePath) {
+        if (resourcePath == null || resourcePath.isBlank()) {
+            return new BufferedImage[0];
+        }
+        try (InputStream raw = ResourceLoader.open(resourcePath)) {
+            if (raw == null) {
+                return new BufferedImage[0];
+            }
+            try (ImageInputStream stream = ImageIO.createImageInputStream(new BufferedInputStream(raw))) {
+                if (stream == null) {
+                    return new BufferedImage[0];
+                }
+                Iterator<ImageReader> readers = ImageIO.getImageReaders(stream);
+                if (!readers.hasNext()) {
+                    return new BufferedImage[0];
+                }
+                ImageReader reader = readers.next();
+                try {
+                    reader.setInput(stream, false, false);
+                    int count = reader.getNumImages(true);
+                    List<BufferedImage> frames = new ArrayList<>(Math.max(1, count));
+                    for (int i = 0; i < count; i++) {
+                        try {
+                            BufferedImage frame = reader.read(i);
+                            if (frame != null) {
+                                frames.add(frame);
+                            }
+                        } catch (IndexOutOfBoundsException ignored) {
+                            break;
+                        }
+                    }
+                    return frames.toArray(new BufferedImage[0]);
+                } finally {
+                    reader.dispose();
+                }
+            }
+        } catch (IOException ex) {
+            throw new RuntimeException("Failed to load GIF frames: " + resourcePath, ex);
+        }
     }
 
     /** Populate this sprite from all PNG frames inside a directory. */

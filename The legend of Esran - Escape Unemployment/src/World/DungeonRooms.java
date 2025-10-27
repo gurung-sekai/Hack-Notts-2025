@@ -1,11 +1,12 @@
 package World;
 
-import World.gfx.DungeonTextures;
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
 import World.cutscene.CutsceneDialog;
 import World.cutscene.CutsceneLibrary;
 import World.cutscene.ShopDialog;
+import World.gfx.DungeonTextures;
+import World.ui.UndertaleText;
 import gfx.HiDpiScaler;
 import launcher.ControlAction;
 import launcher.ControlsProfile;
@@ -27,6 +28,7 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
@@ -342,6 +344,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private Point shopRoom;
     private Dir shopDoorFacing;
     private boolean shopInitialized = false;
+    private boolean suppressNextMovementPress = false;
+    private long suppressMovementDeadlineNanos = 0L;
     private boolean goldenKnightIntroShown = false;
     private boolean queenRescued = false;
     private boolean finaleShown = false;
@@ -651,10 +655,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             scaledArrowCache.clear();
         }
         weaponTextures.clear();
-        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true, true);
-        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true, true);
+        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true, false);
+        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true, false);
         putWeaponTexture(WeaponType.BOW, "resources/Miscellanious/weapon_bow.png", true, false);
-        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true, true);
+        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true, false);
         putWeaponTexture(WeaponType.CLAWS, "resources/Miscellanious/weapon_knife.png", true, false);
         arrowTexture = orientWeapon(loadSpriteImage("resources/Miscellanious/weapon_arrow.png"), true, false);
     }
@@ -691,7 +695,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return null;
         }
         BufferedImage result = img;
-        if (rotate) {
+        boolean shouldRotate = rotate && img.getHeight() > img.getWidth();
+        if (shouldRotate) {
             int w = result.getWidth();
             int h = result.getHeight();
             if (w > 0 && h > 0) {
@@ -1101,8 +1106,31 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             if (!timer.isRunning()) {
                 timer.start();
             }
+            clearMovementInput(true);
             requestFocusInWindow();
         }
+    }
+
+    private void clearMovementInput() {
+        clearMovementInput(false);
+    }
+
+    private void clearMovementInput(boolean suppressNext) {
+        up = down = left = right = false;
+        if (suppressNext) {
+            suppressNextMovementPress = true;
+            suppressMovementDeadlineNanos = System.nanoTime() + 300_000_000L; // ~0.3s grace
+        }
+        finaleShown = true;
+        pauseForOverlay(() -> {
+            CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
+                    CutsceneLibrary.queenRescued());
+            JOptionPane.showMessageDialog(DungeonRooms.this,
+                    "You saved the queen! Peace returns to the realm.",
+                    "Victory",
+                    JOptionPane.INFORMATION_MESSAGE);
+            exitHandler.run();
+        });
     }
 
     private void healPlayerTo(int targetHp) {
@@ -1623,6 +1651,21 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
     }
 
     private void triggerMeleeSwing(RoomEnemy enemy) {
@@ -2099,7 +2142,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             inBoss = false;
             iFrames = 60; // grace on return
             timer.start();
-            up = down = left = right = false;
+            clearMovementInput(true);
             requestFocusInWindow();
         });
 
@@ -2591,23 +2634,20 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 if (textures != null && textures.isReady()) {
                     int fCount = Math.max(1, textures.floorVariants());
                     int wCount = Math.max(1, textures.wallVariants());
-                    int fIdx = Math.floorMod(target.floorThemeSeed + x * 17 + y * 31, fCount);
-                    int wIdx = Math.floorMod(target.wallThemeSeed + x * 13 + y * 19, wCount);
+                    int fIdx = tileVariant(target.floorThemeSeed, x, y, fCount, 0);
+                    int wIdx = tileVariant(target.wallThemeSeed, x, y, wCount, 1);
+                    int fOrientation = tileOrientation(target.floorThemeSeed, x, y, 2);
+                    int wOrientation = tileOrientation(target.wallThemeSeed, x, y, 3);
                     switch (t) {
-                        case FLOOR -> drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, target, x, y);
-                        case WALL  -> drawWallTile(gg, textures.wallVariant(wIdx),  px, py, palette, target, x, y);
+                        case FLOOR -> drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, target, x, y, fOrientation);
+                        case WALL  -> drawWallTile(gg, textures.wallVariant(wIdx),  px, py, palette, target, x, y, wOrientation);
                         case DOOR  -> {
                             BufferedImage doorTile = textures.doorFloor();
                             if (doorTile != null) {
-                                drawFloorTile(gg, doorTile, px, py, palette, target, x, y);
+                                drawFloorTile(gg, doorTile, px, py, palette, target, x, y, 0);
                             } else {
-                                drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, target, x, y);
+                                drawFloorTile(gg, textures.floorVariant(fIdx), px, py, palette, target, x, y, fOrientation);
                             }
-                            gg.setColor(new Color(220, 172, 60));
-                            if (x == 0 || x == COLS - 1)
-                                gg.fillRect(px + (x == 0 ? 0 : TILE - 6), py + 6, 6, TILE - 12);
-                            if (y == 0 || y == ROWS - 1)
-                                gg.fillRect(px + 6, py + (y == 0 ? 0 : TILE - 6), TILE - 12, 6);
                         }
                         default -> {}
                     }
@@ -2627,6 +2667,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.drawImage(cached, 0, 0, null);
         } else {
             paintRoomTiles(gg, room, palette);
+        }
+        if (textures != null && textures.hasDoorAnimation()) {
+            drawDoorways(gg);
         }
         if (room != null && room.shopDoor != null && room.lockedDoors.contains(room.shopDoor)) {
             // shop doors never lock but keep defensive guard
@@ -2752,13 +2795,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return ROOM_PALETTES[index];
     }
 
-    private void drawFloorTile(Graphics2D gg, BufferedImage texture, int px, int py, RoomPalette palette, Room room, int tx, int ty) {
-        if (texture != null) {
-            gg.drawImage(texture, px, py, TILE, TILE, null);
-        } else {
-            gg.setColor(new Color(24, 60, 78));
-            gg.fillRect(px, py, TILE, TILE);
-        }
+    private void drawFloorTile(Graphics2D gg, BufferedImage texture, int px, int py, RoomPalette palette,
+                               Room room, int tx, int ty, int orientation) {
+        drawTexture(gg, texture, px, py, orientation, new Color(24, 60, 78));
         if (palette == null) {
             return;
         }
@@ -2767,6 +2806,19 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.setColor(palette.floorTint);
         gg.fillRect(px, py, TILE, TILE);
         gg.setComposite(original);
+
+        if (textures != null && textures.hasFloorOverlays()) {
+            int overlaySalt = accentHash(room, tx, ty, 9);
+            if (Math.floorMod(overlaySalt, 6) == 0) {
+                BufferedImage overlay = textures.floorOverlay(Math.floorMod(overlaySalt, Math.max(1, textures.floorOverlayCount())));
+                if (overlay != null) {
+                    java.awt.Composite old = gg.getComposite();
+                    gg.setComposite(AlphaComposite.SrcOver.derive(0.35f));
+                    gg.drawImage(overlay, px, py, TILE, TILE, null);
+                    gg.setComposite(old);
+                }
+            }
+        }
 
         if (palette.floorAccent != null) {
             gg.setComposite(AlphaComposite.SrcOver.derive(0.18f));
@@ -2783,13 +2835,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.drawRect(px, py, TILE, TILE);
     }
 
-    private void drawWallTile(Graphics2D gg, BufferedImage texture, int px, int py, RoomPalette palette, Room room, int tx, int ty) {
-        if (texture != null) {
-            gg.drawImage(texture, px, py, TILE, TILE, null);
-        } else {
-            gg.setColor(new Color(38, 82, 96));
-            gg.fillRect(px, py, TILE, TILE);
-        }
+    private void drawWallTile(Graphics2D gg, BufferedImage texture, int px, int py, RoomPalette palette,
+                               Room room, int tx, int ty, int orientation) {
+        drawTexture(gg, texture, px, py, orientation, new Color(38, 82, 96));
         if (palette == null) {
             return;
         }
@@ -2811,6 +2859,88 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.setColor(new Color(palette.wallHighlight.getRed(), palette.wallHighlight.getGreen(), palette.wallHighlight.getBlue(), 80));
             gg.fillRect(px, py, 4, TILE);
         }
+
+        int crackSeed = accentHash(room, tx, ty, 7);
+        if (Math.floorMod(crackSeed, 9) == 0) {
+            java.awt.Composite oldComposite = gg.getComposite();
+            Stroke previousStroke = gg.getStroke();
+            gg.setComposite(AlphaComposite.SrcOver.derive(0.4f));
+            gg.setColor(new Color(palette.wallShadow.getRed(), palette.wallShadow.getGreen(), palette.wallShadow.getBlue(), 180));
+            gg.setStroke(new BasicStroke(Math.max(1.4f, TILE / 24f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            int cx = px + TILE / 2 + Math.floorMod(crackSeed, 5) - 2;
+            gg.drawLine(cx, py + 4, cx - 3, py + TILE / 2);
+            gg.drawLine(cx - 3, py + TILE / 2, cx + 1, py + TILE - 6);
+            gg.setStroke(previousStroke);
+            gg.setComposite(oldComposite);
+        }
+
+        if (Math.floorMod(crackSeed, 11) == 3) {
+            java.awt.Composite oldComposite = gg.getComposite();
+            gg.setComposite(AlphaComposite.SrcOver.derive(0.28f));
+            gg.setColor(new Color(60, 110, 70, 160));
+            int offsetX = px + Math.min(TILE - 10, Math.max(2, Math.floorMod(crackSeed, TILE)));
+            gg.fillOval(offsetX - 4, py + TILE - 10, 8, 6);
+            gg.setComposite(oldComposite);
+        }
+
+        if (textures != null && textures.hasWallOverlays()) {
+            int overlaySalt = accentHash(room, tx, ty, 13);
+            if (Math.floorMod(overlaySalt, 7) == 0) {
+                BufferedImage overlay = textures.wallOverlay(Math.floorMod(overlaySalt, Math.max(1, textures.wallOverlayCount())));
+                if (overlay != null) {
+                    java.awt.Composite oldComposite = gg.getComposite();
+                    gg.setComposite(AlphaComposite.SrcOver.derive(0.42f));
+                    gg.drawImage(overlay, px, py, TILE, TILE, null);
+                    gg.setComposite(oldComposite);
+                }
+            }
+        }
+    }
+
+    private void drawTexture(Graphics2D gg, BufferedImage texture, int px, int py, int orientation, Color fallback) {
+        if (texture == null) {
+            gg.setColor(fallback);
+            gg.fillRect(px, py, TILE, TILE);
+            return;
+        }
+        int orient = Math.floorMod(orientation, 4);
+        if (orient == 0) {
+            gg.drawImage(texture, px, py, TILE, TILE, null);
+            return;
+        }
+        AffineTransform original = gg.getTransform();
+        gg.translate(px + TILE / 2.0, py + TILE / 2.0);
+        switch (orient) {
+            case 1 -> gg.rotate(Math.PI / 2.0);
+            case 2 -> gg.rotate(Math.PI);
+            case 3 -> gg.rotate(-Math.PI / 2.0);
+            default -> { }
+        }
+        gg.drawImage(texture, -TILE / 2, -TILE / 2, TILE, TILE, null);
+        gg.setTransform(original);
+    }
+
+    private int tileVariant(int seed, int x, int y, int count, int salt) {
+        if (count <= 0) {
+            return 0;
+        }
+        int hash = mix32(seed ^ (x * 0x632bea5d) ^ (y * 0x85157af5) ^ (salt * 0x27d4eb2d));
+        return Math.floorMod(hash, count);
+    }
+
+    private int tileOrientation(int seed, int x, int y, int salt) {
+        int hash = mix32(seed ^ (x * 0x45d9f3b) ^ (y * 0x119de1f3) ^ (salt * 0x6eed0e9d));
+        return Math.floorMod(hash, 4);
+    }
+
+    private static int mix32(int value) {
+        int z = value;
+        z ^= (z >>> 16);
+        z *= 0x7feb352d;
+        z ^= (z >>> 15);
+        z *= 0x846ca68b;
+        z ^= (z >>> 16);
+        return z;
     }
 
     private int accentHash(Room room, int tx, int ty, int salt) {
@@ -3147,45 +3277,116 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void drawHud(Graphics2D overlay) {
-        overlay.setColor(new Color(255, 255, 255, 210));
-        String controlsLine = String.format("Move: %s/%s/%s/%s   Shoot: %s   Reroll: %s   Pause: %s",
+        if (overlay == null) {
+            return;
+        }
+        overlay.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
+        Font hudFont = UndertaleText.font(18f);
+        overlay.setFont(hudFont);
+        FontMetrics fm = overlay.getFontMetrics(hudFont);
+        int padding = 14;
+
+        List<String> infoLines = new ArrayList<>();
+        String invul = iFrames > 0 ? " (INVUL)" : "";
+        infoLines.add(String.format("HP: %d%s", playerHP, invul).toUpperCase(Locale.ENGLISH));
+        infoLines.add(String.format("KEYS: %d   COINS: %d", keysHeld, coins).toUpperCase(Locale.ENGLISH));
+        if (worldPos != null) {
+            infoLines.add(String.format("ROOM: (%d, %d)", worldPos.x, worldPos.y).toUpperCase(Locale.ENGLISH));
+        }
+        String moveLine = String.format("MOVE: %s/%s/%s/%s",
                 keyName(ControlAction.MOVE_UP),
                 keyName(ControlAction.MOVE_DOWN),
                 keyName(ControlAction.MOVE_LEFT),
-                keyName(ControlAction.MOVE_RIGHT),
+                keyName(ControlAction.MOVE_RIGHT));
+        infoLines.add(moveLine.toUpperCase(Locale.ENGLISH));
+        String actionLine = String.format("SHOOT: %s   REROLL: %s   PAUSE: %s",
                 keyName(ControlAction.SHOOT),
                 keyName(ControlAction.REROLL),
                 keyName(ControlAction.PAUSE));
-        overlay.drawString("HP: " + playerHP + (iFrames>0?" (invul)":""), 10, 18);
-        overlay.drawString(controlsLine, 10, 34);
-        overlay.drawString(String.format("Keys: %d    Coins: %d", keysHeld, coins), 10, 50);
-        overlay.drawString(String.format("Room (%d,%d)", worldPos.x, worldPos.y), 10, 66);
-        overlay.drawString(texts.text("story"), 10, 82);
+        infoLines.add(actionLine.toUpperCase(Locale.ENGLISH));
+        String story = texts.text("story");
+        if (story != null && !story.isBlank()) {
+            infoLines.add(story.toUpperCase(Locale.ENGLISH));
+        }
+
+        int lineHeight = fm.getHeight();
+        int infoWidth = 0;
+        for (String line : infoLines) {
+            infoWidth = Math.max(infoWidth, fm.stringWidth(line));
+        }
+        Rectangle infoBox = new Rectangle(10, 10, infoWidth + padding * 2,
+                lineHeight * infoLines.size() + padding * 2);
+        UndertaleText.paintFrame(overlay, infoBox, 22);
+
+        int textY = infoBox.y + padding + fm.getAscent();
+        for (String line : infoLines) {
+            UndertaleText.drawString(overlay, line, infoBox.x + padding, textY);
+            textY += lineHeight;
+        }
+
         if (isBossRoom(worldPos)) {
-            overlay.drawString("Guardian Lair", getWidth() - 160, 18);
+            String label = "GUARDIAN LAIR";
+            int labelWidth = fm.stringWidth(label);
+            UndertaleText.drawString(overlay, label,
+                    Math.max(infoBox.x + infoBox.width + 20, getWidth() - labelWidth - padding),
+                    infoBox.y + fm.getAscent() + padding);
         }
 
         Rectangle minimapArea = drawMinimap(overlay);
-        overlay.setColor(new Color(255, 255, 255, 210));
 
         if (!statusMessage.isBlank()) {
-            int boxWidth = getWidth() - 20;
-            int boxHeight = 26;
+            int baseWidth = getWidth() - 20;
             int boxX = 10;
-            int boxY = getHeight() - boxHeight - 10;
             if (minimapArea != null) {
                 int candidateX = minimapArea.x + minimapArea.width + 10;
                 int candidateWidth = getWidth() - candidateX - 10;
-                if (candidateWidth >= 220) {
+                if (candidateWidth >= 240) {
                     boxX = candidateX;
-                    boxWidth = candidateWidth;
+                    baseWidth = candidateWidth;
                 }
             }
-            overlay.setColor(new Color(0, 0, 0, 160));
-            overlay.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 14, 14);
-            overlay.setColor(new Color(255, 255, 255, 230));
-            overlay.drawString(statusMessage, boxX + 10, boxY + 18);
+            int contentWidth = Math.max(120, baseWidth - padding * 2);
+            int messageLines = estimateParagraphLines(fm, statusMessage, contentWidth);
+            int boxHeight = padding * 2 + Math.max(1, messageLines) * lineHeight;
+            int boxY = getHeight() - boxHeight - 10;
+            Rectangle statusBox = new Rectangle(boxX, boxY, baseWidth, boxHeight);
+            UndertaleText.paintFrame(overlay, statusBox, 18);
+            int messageY = statusBox.y + padding + fm.getAscent();
+            UndertaleText.drawParagraph(overlay, statusMessage.toUpperCase(Locale.ENGLISH),
+                    statusBox.x + padding, messageY, statusBox.width - padding * 2);
         }
+    }
+
+    private int estimateParagraphLines(FontMetrics fm, String text, int width) {
+        if (fm == null || text == null || text.isBlank() || width <= 0) {
+            return 0;
+        }
+        String remaining = text.trim();
+        boolean first = true;
+        int lines = 0;
+        while (!remaining.isEmpty()) {
+            int available = width - fm.stringWidth(first ? "* " : "  ");
+            if (available <= 0) {
+                lines++;
+                break;
+            }
+            int len = remaining.length();
+            while (len > 0 && fm.stringWidth(remaining.substring(0, len)) > available) {
+                len--;
+            }
+            if (len <= 0) {
+                lines++;
+                break;
+            }
+            int lastSpace = remaining.substring(0, len).lastIndexOf(' ');
+            if (lastSpace > 0 && len < remaining.length()) {
+                len = lastSpace + 1;
+            }
+            remaining = remaining.substring(Math.min(len, remaining.length())).trim();
+            lines++;
+            first = false;
+        }
+        return lines;
     }
 
     private Rectangle drawMinimap(Graphics2D overlay) {
@@ -3273,7 +3474,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         overlay.drawRoundRect(mapX, mapY, mapWidth, mapHeight, 18, 18);
 
         overlay.setColor(new Color(218, 234, 240));
-        overlay.drawString(texts.text("hud_map"), mapX + MINIMAP_HORIZONTAL_PADDING, mapY + 18);
+        UndertaleText.drawString(overlay,
+                texts.text("hud_map").toUpperCase(Locale.ENGLISH),
+                mapX + MINIMAP_HORIZONTAL_PADDING, mapY + 18);
 
         int gridOriginX = mapX + MINIMAP_HORIZONTAL_PADDING;
         int gridOriginY = mapY + MINIMAP_HEADER;
@@ -3385,11 +3588,17 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int footerY = mapY + mapHeight - 18;
         overlay.setStroke(originalStroke);
         overlay.setColor(new Color(210, 226, 232));
-        overlay.drawString(texts.text("hud_rooms", visitedRooms.size()), mapX + MINIMAP_HORIZONTAL_PADDING, footerY);
-        overlay.drawString(texts.text("hud_exits", accessible.size()), mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 16);
+        UndertaleText.drawString(overlay,
+                texts.text("hud_rooms", visitedRooms.size()).toUpperCase(Locale.ENGLISH),
+                mapX + MINIMAP_HORIZONTAL_PADDING, footerY);
+        UndertaleText.drawString(overlay,
+                texts.text("hud_exits", accessible.size()).toUpperCase(Locale.ENGLISH),
+                mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 16);
         if (!locked.isEmpty()) {
             overlay.setColor(new Color(235, 210, 160));
-            overlay.drawString(texts.text("hud_locked", locked.size()), mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 32);
+            UndertaleText.drawString(overlay,
+                    texts.text("hud_locked", locked.size()).toUpperCase(Locale.ENGLISH),
+                    mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 32);
         }
 
         overlay.setColor(originalColour);
@@ -3399,6 +3608,51 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private String keyName(ControlAction action) {
         return KeyEvent.getKeyText(controls.keyFor(action));
+    }
+
+    private void drawDoorways(Graphics2D gg) {
+        if (gg == null || room == null || room.doors == null || room.doors.isEmpty()) {
+            return;
+        }
+        if (textures == null || !textures.hasDoorAnimation()) {
+            return;
+        }
+        int frameCount = Math.max(1, textures.doorFrameCount());
+        BufferedImage frame = textures.doorFrame((animTick / 12) % frameCount);
+        if (frame == null) {
+            return;
+        }
+        double align = (TILE / 2.0) - (frame.getHeight() / 2.0);
+        for (Dir dir : room.doors) {
+            if (dir == null) {
+                continue;
+            }
+            Point tile = doorTile(dir);
+            if (tile == null) {
+                continue;
+            }
+            int px = tile.x * TILE;
+            int py = tile.y * TILE;
+            AffineTransform original = gg.getTransform();
+            gg.translate(px + TILE / 2.0, py + TILE / 2.0);
+            switch (dir) {
+                case N -> {
+                    gg.rotate(Math.PI);
+                    gg.translate(0, align);
+                }
+                case S -> gg.translate(0, align);
+                case W -> {
+                    gg.rotate(Math.PI / 2.0);
+                    gg.translate(0, align);
+                }
+                case E -> {
+                    gg.rotate(-Math.PI / 2.0);
+                    gg.translate(0, align);
+                }
+            }
+            gg.drawImage(frame, -frame.getWidth() / 2, -frame.getHeight() / 2, null);
+            gg.setTransform(original);
+        }
     }
 
     private void drawPadlock(Graphics2D gg, int px, int py) {
@@ -3443,16 +3697,26 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     @Override
     public void keyPressed(KeyEvent e) {
-        if (matches(e, ControlAction.MOVE_UP)) {
+        boolean blockMovement = false;
+        if (suppressNextMovementPress) {
+            long now = System.nanoTime();
+            if (now > suppressMovementDeadlineNanos) {
+                suppressNextMovementPress = false;
+            } else if (isMovementKey(e)) {
+                blockMovement = true;
+                suppressNextMovementPress = false;
+            }
+        }
+        if (!blockMovement && matches(e, ControlAction.MOVE_UP)) {
             up = true;
         }
-        if (matches(e, ControlAction.MOVE_DOWN)) {
+        if (!blockMovement && matches(e, ControlAction.MOVE_DOWN)) {
             down = true;
         }
-        if (matches(e, ControlAction.MOVE_LEFT)) {
+        if (!blockMovement && matches(e, ControlAction.MOVE_LEFT)) {
             left = true;
         }
-        if (matches(e, ControlAction.MOVE_RIGHT)) {
+        if (!blockMovement && matches(e, ControlAction.MOVE_RIGHT)) {
             right = true;
         }
         if (matches(e, ControlAction.SHOOT)) {
@@ -3477,6 +3741,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     @Override
     public void keyTyped(KeyEvent e) { }
+
+    private boolean isMovementKey(KeyEvent e) {
+        return matches(e, ControlAction.MOVE_UP)
+                || matches(e, ControlAction.MOVE_DOWN)
+                || matches(e, ControlAction.MOVE_LEFT)
+                || matches(e, ControlAction.MOVE_RIGHT);
+    }
 
     private boolean matches(KeyEvent e, ControlAction action) {
         int code = e.getKeyCode();
