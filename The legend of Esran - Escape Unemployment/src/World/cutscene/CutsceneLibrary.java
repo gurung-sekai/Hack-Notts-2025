@@ -2,7 +2,7 @@ package World.cutscene;
 
 import java.util.List;
 
-import static Battle.scene.BossBattlePanel.BossKind;
+import Battle.scene.BossBattlePanel.BossKind;
 
 /**
  * Prebuilt narrative sequences.
