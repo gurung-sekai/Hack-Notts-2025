@@ -242,6 +242,8 @@ public final class DungeonRoomsSnapshot implements Serializable {
         clone.spawnsPrepared = room.spawnsPrepared;
         clone.floorThemeSeed = room.floorThemeSeed;
         clone.wallThemeSeed = room.wallThemeSeed;
+        clone.paletteIndex = room.paletteIndex;
+        clone.accentSeed = room.accentSeed;
         return clone;
     }
 
@@ -291,6 +293,12 @@ public final class DungeonRoomsSnapshot implements Serializable {
             e.windup = enemy.windup;
             e.patternIndex = enemy.patternIndex;
             e.damageBuffer = enemy.damageBuffer;
+            e.weapon = enemy.weapon;
+            e.attackAnimTicks = enemy.attackAnimTicks;
+            e.attackAnimDuration = enemy.attackAnimDuration;
+            e.bowDrawTicks = enemy.bowDrawTicks;
+            e.facingAngle = enemy.facingAngle;
+            e.weaponAngle = enemy.weaponAngle;
             if (enemy.spawn != null) {
                 DungeonRooms.EnemySpawn spawn = new DungeonRooms.EnemySpawn();
                 spawn.x = enemy.spawn.x;
@@ -357,6 +365,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
             b.explosive = bullet.explosive;
             b.explosionRadius = bullet.explosionRadius;
             b.explosionLife = bullet.explosionLife;
+            b.kind = bullet.kind;
             list.add(b);
         }
         return list;
