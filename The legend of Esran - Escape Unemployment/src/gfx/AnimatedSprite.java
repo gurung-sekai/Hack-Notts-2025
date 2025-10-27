@@ -197,7 +197,15 @@ public class AnimatedSprite {
         return new FrameKey(prefix.toLowerCase(Locale.ROOT), number);
     }
 
-    private record FrameKey(String prefix, int number) implements Comparable<FrameKey> {
+    private static final class FrameKey implements Comparable<FrameKey> {
+        private final String prefix;
+        private final int number;
+
+        private FrameKey(String prefix, int number) {
+            this.prefix = prefix;
+            this.number = number;
+        }
+
         @Override
         public int compareTo(FrameKey other) {
             int cmp = prefix.compareTo(other.prefix);
@@ -206,8 +214,23 @@ public class AnimatedSprite {
             }
             return Integer.compare(number, other.number);
         }
-        add(state, frames);
-        return true;
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null || getClass() != obj.getClass()) {
+                return false;
+            }
+            FrameKey frameKey = (FrameKey) obj;
+            return number == frameKey.number && Objects.equals(prefix, frameKey.prefix);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(prefix, number);
+        }
     }
 
     public static BufferedImage[] normaliseFrames(BufferedImage[] frames) {
