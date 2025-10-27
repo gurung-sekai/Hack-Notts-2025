@@ -77,6 +77,7 @@ public class BossBattlePanel extends JPanel {
     private final List<BattleMessage> battleMessages = new ArrayList<>();
 
     private final BufferedImage floorTile;
+    private final Timer animationTimer;
 
     private long lastTickNs = 0;
     private double resolveLock = 0.0;
@@ -115,7 +116,25 @@ public class BossBattlePanel extends JPanel {
             }
         });
 
-        new javax.swing.Timer(1000 / 60, e -> tick()).start();
+        animationTimer = new Timer(1000 / 60, e -> tick());
+        animationTimer.start();
+    }
+
+    /** Stop the animation timer so the panel can be disposed without background work. */
+    public void shutdown() {
+        animationTimer.stop();
+    }
+
+    @Override public void addNotify() {
+        super.addNotify();
+        if (!animationTimer.isRunning()) {
+            animationTimer.start();
+        }
+    }
+
+    @Override public void removeNotify() {
+        animationTimer.stop();
+        super.removeNotify();
     }
 
     private void chooseCommand() {
@@ -305,6 +324,8 @@ public class BossBattlePanel extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         LayoutMetrics metrics = layoutMetrics();
+        heroVisual.ensureWarmed(metrics.scale());
+        bossVisual.ensureWarmed(metrics.scale());
 
         drawFloor(g2);
         drawEffectsBehind(g2);
@@ -326,6 +347,8 @@ public class BossBattlePanel extends JPanel {
     }
 
     private record LayoutMetrics(double scale, double offsetX, double offsetY) { }
+
+    private record FrameSize(int width, int height) { }
 
     private void drawFloor(Graphics2D g2) {
         if (floorTile == null) return;
@@ -384,31 +407,40 @@ public class BossBattlePanel extends JPanel {
         double offsetY = metrics.offsetY();
         int cx = (int) Math.round(offsetX + vis.footX * scale);
         int cy = (int) Math.round(offsetY + vis.footY * scale);
-        if (frame == null) {
+        FrameSize size = scaledFrameSize(vis, frame, scale);
+        if (frame == null || size.width() <= 0 || size.height() <= 0) {
             vis.bounds.setBounds(cx, cy, 0, 0);
             return vis.bounds;
         }
-        double spriteScale = vis.baseScale * scale * SPRITE_SCALE_BOOST;
+        int w = size.width();
+        int h = size.height();
+        vis.bounds.setBounds(cx - w / 2, cy - h, w, h);
+        return vis.bounds;
+    }
+
+    private static FrameSize scaledFrameSize(FighterVisual vis, BufferedImage frame, double layoutScale) {
+        if (frame == null || layoutScale <= 0 || Double.isNaN(layoutScale)) {
+            return new FrameSize(0, 0);
+        }
+        double spriteScale = vis.baseScale * layoutScale * SPRITE_SCALE_BOOST;
         double rawW = frame.getWidth() * spriteScale;
         double rawH = frame.getHeight() * spriteScale;
-        double maxHeightPx = vis.maxHeightPx(scale);
-        double maxWidthPx = vis.maxWidthPx(scale);
+        double maxHeightPx = vis.maxHeightPx(layoutScale);
+        double maxWidthPx = vis.maxWidthPx(layoutScale);
         double clamp = 1.0;
-        if (rawH > maxHeightPx) {
+        if (Double.isFinite(maxHeightPx) && rawH > maxHeightPx) {
             clamp = Math.min(clamp, maxHeightPx / Math.max(1.0, rawH));
         }
-        if (rawW > maxWidthPx) {
+        if (Double.isFinite(maxWidthPx) && rawW > maxWidthPx) {
             clamp = Math.min(clamp, maxWidthPx / Math.max(1.0, rawW));
         }
         if (clamp < 1.0) {
-            spriteScale *= clamp;
             rawW *= clamp;
             rawH *= clamp;
         }
         int w = Math.max(1, (int) Math.round(rawW));
         int h = Math.max(1, (int) Math.round(rawH));
-        vis.bounds.setBounds(cx - w / 2, cy - h, w, h);
-        return vis.bounds;
+        return new FrameSize(w, h);
     }
 
     private Point centerOf(FighterVisual vis, LayoutMetrics metrics) {
@@ -615,6 +647,7 @@ public class BossBattlePanel extends JPanel {
         private int attackCursor = 0;
         private FrameAnim activeAttack = null;
         private double attackTimer = 0.0;
+        private double warmedScale = Double.NaN;
 
         FighterVisual(Fighter fighter, SpriteSource spriteSource, double footX, double footY,
                       double baseScale, double maxHeight, List<String> attackIds) {
@@ -663,6 +696,9 @@ public class BossBattlePanel extends JPanel {
             }
             this.activeAttack = anim;
             this.attackTimer = Math.max(anim.duration(), MIN_ATTACK_DISPLAY);
+            if (Double.isFinite(warmedScale)) {
+                anim.forEachFrame(frame -> warmFrame(frame, warmedScale));
+            }
             return attackTimer;
         }
 
@@ -707,6 +743,40 @@ public class BossBattlePanel extends JPanel {
 
         double maxWidthPx(double layoutScale) {
             return maxWidthBase > 0 ? maxWidthBase * layoutScale : Double.POSITIVE_INFINITY;
+        }
+
+        void ensureWarmed(double layoutScale) {
+            if (!Double.isFinite(layoutScale) || layoutScale <= 0) {
+                return;
+            }
+            if (Double.isFinite(warmedScale) && Math.abs(warmedScale - layoutScale) < 1e-3) {
+                return;
+            }
+            sprite.forEachFrame(frame -> warmFrame(frame, layoutScale));
+            for (String attackId : attackIds) {
+                BufferedImage[] frames = BossFXLibrary.attackFrames(attackId);
+                if (frames == null) {
+                    continue;
+                }
+                for (BufferedImage frame : frames) {
+                    warmFrame(frame, layoutScale);
+                }
+            }
+            if (activeAttack != null) {
+                activeAttack.forEachFrame(frame -> warmFrame(frame, layoutScale));
+            }
+            warmedScale = layoutScale;
+        }
+
+        private void warmFrame(BufferedImage frame, double layoutScale) {
+            if (frame == null) {
+                return;
+            }
+            FrameSize size = scaledFrameSize(this, frame, layoutScale);
+            if (size.width() <= 0 || size.height() <= 0) {
+                return;
+            }
+            HiDpiScaler.scale(frame, size.width(), size.height());
         }
     }
 

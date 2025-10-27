@@ -6,6 +6,8 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /** Frame-by-frame animation helper (for VFX). */
 public class FrameAnim {
@@ -102,4 +104,13 @@ public class FrameAnim {
     public int h() { return maxHeight; }
     public int maxWidth() { return maxWidth; }
     public int maxHeight() { return maxHeight; }
+
+    public void forEachFrame(Consumer<BufferedImage> consumer) {
+        Objects.requireNonNull(consumer, "consumer");
+        for (BufferedImage frame : frames) {
+            if (frame != null) {
+                consumer.accept(frame);
+            }
+        }
+    }
 }

@@ -12,7 +12,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Enumeration;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -21,6 +20,8 @@ import java.util.TreeSet;
 import java.util.function.Predicate;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+
+import util.ProjectDirectories;
 
 /**
  * Lightweight helper that tries both the classpath and common filesystem roots when loading art assets.
@@ -36,7 +37,7 @@ public final class ResourceLoader {
         ImageIO.setUseCache(false);
     }
 
-    private static final List<Path> SEARCH_ROOTS = buildSearchRoots();
+    private static final List<Path> SEARCH_ROOTS = ProjectDirectories.locateSearchRoots();
 
     private ResourceLoader() {
     }
@@ -379,25 +380,4 @@ public final class ResourceLoader {
         directories.add("/" + base + directoryName);
     }
 
-    private static List<Path> buildSearchRoots() {
-        Set<Path> roots = new LinkedHashSet<>();
-
-        // Always try relative lookups first so unit tests that set an explicit working directory succeed.
-        roots.add(Path.of(""));
-        roots.add(Path.of("src"));
-
-        // Walk up from the current working directory, recording both the directory and its src child.
-        Path cwd = Paths.get("").toAbsolutePath().normalize();
-        for (Path cursor = cwd; cursor != null; cursor = cursor.getParent()) {
-            roots.add(cursor);
-            roots.add(cursor.resolve("src"));
-
-            // If the project root lives under this directory, include it explicitly so running from submodules works.
-            roots.add(cursor.resolve("The legend of Esran - Escape Unemployment"));
-            roots.add(cursor.resolve("The legend of Esran - Escape Unemployment").resolve("src"));
-        }
-
-        // Materialize the ordered set into an immutable list for iteration.
-        return new ArrayList<>(roots);
-    }
 }

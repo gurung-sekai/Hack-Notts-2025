@@ -118,6 +118,28 @@ sourceSets {
             srcDirs = ['src']
         }
     }
+    test {
+        java {
+            srcDirs = ['test']
+        }
+        resources {
+            srcDirs = ['test-resources']
+        }
+    }
+}
+
+tasks.named('test').configure {
+    doLast {
+        ['unit.gfx.AnimatedSpriteFrameEnumerationTest',
+         'integration.battle.scene.BossBattlePanelPrewarmIntegrationTest',
+         'acceptance.battle.scene.BossBattleFlowAcceptanceTest',
+         'security.integrity.IntegrityVerifierTest'].each { testClass ->
+            javaexec {
+                classpath = project.sourceSets.test.runtimeClasspath
+                mainClass = testClass
+            }
+        }
+    }
 }
 
 // Ensure all Java executions (run, test) see the JavaFX modules.

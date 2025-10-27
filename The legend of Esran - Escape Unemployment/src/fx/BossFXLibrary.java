@@ -30,6 +30,15 @@ public final class BossFXLibrary {
         return FrameAnim.fromFrames(frames, fps, loop);
     }
 
+    /**
+     * Expose the cached attack frames so callers can pre-warm scaling caches without duplicating assets.
+     */
+    public static BufferedImage[] attackFrames(String attackId) {
+        String normalized = normalize(attackId);
+        BufferedImage[] frames = loadFrames(normalized);
+        return frames.clone();
+    }
+
     private static String normalize(String attackId) {
         if (attackId == null || attackId.trim().isEmpty()) {
             throw new IllegalArgumentException("attackId must not be blank");

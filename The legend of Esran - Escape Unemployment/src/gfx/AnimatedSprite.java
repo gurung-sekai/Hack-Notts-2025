@@ -13,6 +13,8 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * Lightweight sprite animator.
@@ -204,6 +206,8 @@ public class AnimatedSprite {
             }
             return Integer.compare(number, other.number);
         }
+        add(state, frames);
+        return true;
     }
 
     public static BufferedImage[] normaliseFrames(BufferedImage[] frames) {
@@ -281,5 +285,24 @@ public class AnimatedSprite {
 
     public int maxFrameHeight() {
         return maxFrameHeight;
+    }
+
+    /**
+     * Visit every frame stored across all animation states.
+     * Frames are provided in insertion order so callers can perform
+     * cache warm-up or analysis without exposing the internal arrays.
+     */
+    public void forEachFrame(Consumer<BufferedImage> consumer) {
+        Objects.requireNonNull(consumer, "consumer");
+        for (BufferedImage[] sequence : states.values()) {
+            if (sequence == null) {
+                continue;
+            }
+            for (BufferedImage frame : sequence) {
+                if (frame != null) {
+                    consumer.accept(frame);
+                }
+            }
+        }
     }
 }
