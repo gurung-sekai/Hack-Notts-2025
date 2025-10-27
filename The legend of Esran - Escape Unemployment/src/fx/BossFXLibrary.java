@@ -10,7 +10,8 @@ public final class BossFXLibrary {
     private static final SpriteSheetSlicer.Options ATTACK_OPTIONS = SpriteSheetSlicer.Options.DEFAULT
             .withPadding(1)
             .withAlphaThreshold(10)
-            .withMinFrameArea(96);
+            .withMinFrameArea(96)
+            .withJoinGap(2);
 
     private BossFXLibrary() {
     }
