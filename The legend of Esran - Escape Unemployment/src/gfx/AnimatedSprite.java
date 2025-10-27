@@ -206,6 +206,8 @@ public class AnimatedSprite {
             }
             return Integer.compare(number, other.number);
         }
+        add(state, frames);
+        return true;
     }
 
     public static BufferedImage[] normaliseFrames(BufferedImage[] frames) {
