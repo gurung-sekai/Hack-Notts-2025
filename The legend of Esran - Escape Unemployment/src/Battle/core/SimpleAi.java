@@ -19,6 +19,9 @@ public class SimpleAi {
 
         Technique best = BaseMoves.MOVES[0];
         double bestScore = Double.NEGATIVE_INFINITY;
+        Technique lastUsed = me.lastUsed;
+        double myHpRatio = me.hp / (double) Math.max(1, me.base.hp);
+        double oppHpRatio = opp.hp / (double) Math.max(1, opp.base.hp);
 
         for (Technique t : BaseMoves.MOVES) {
             int cooldown = me.cd.getOrDefault(t, 0);
@@ -37,8 +40,9 @@ public class SimpleAi {
 
             double hpRatio = me.hp / (double) Math.max(1, me.base.hp);
             if (t.tag == Tag.GUARD) {
-                if (hpRatio < 0.45) score += 16;
-                else if (hpRatio > 0.85) score -= 8;
+                if (hpRatio < 0.45) score += 18;
+                else if (hpRatio > 0.85) score -= 10;
+                if (momentum < -1) score += 7;
             }
             if (opp.status == Status.IGNITED && t == BaseMoves.FLAME_LASH) {
                 score -= 6;
@@ -48,6 +52,47 @@ public class SimpleAi {
             }
             if (momentum < -1 && t.tag == Tag.GUARD) {
                 score += 5;
+            }
+
+            if (t == BaseMoves.FLAME_LASH) {
+                if (opp.status == Status.ROOTED) {
+                    score += 6;
+                }
+                if (opp.status == Status.IGNITED) {
+                    score += 8;
+                }
+                if (oppHpRatio < 0.35) {
+                    score += 4;
+                }
+            }
+            if (t == BaseMoves.THORN_BIND) {
+                if (opp.status != Status.ROOTED) {
+                    score += (momentum >= 0 ? 10 : 6);
+                }
+                if (opp.charging != null) {
+                    score += 9;
+                }
+            }
+            if (t == BaseMoves.DISRUPT_BOLT) {
+                if (opp.status != Status.SHOCKED) {
+                    score += 5;
+                }
+                if (momentum > 1) {
+                    score += 3;
+                }
+                if (oppHpRatio > myHpRatio + 0.2) {
+                    score += 4;
+                }
+            }
+
+            if (lastUsed == t) {
+                score -= 6.5;
+            }
+            if (lastUsed == BaseMoves.THORN_BIND && t == BaseMoves.FLAME_LASH && opp.status == Status.ROOTED) {
+                score += 10;
+            }
+            if (lastUsed == BaseMoves.FLAME_LASH && t == BaseMoves.BRACE && myHpRatio < 0.5) {
+                score += 6;
             }
 
             // Inject a small amount of variance so the boss occasionally

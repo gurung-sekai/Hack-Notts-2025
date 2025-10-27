@@ -22,6 +22,8 @@ public class AnimatedSprite {
     public enum State { IDLE, RUN, HIT }
 
     private final Map<State, BufferedImage[]> states = new EnumMap<>(State.class);
+    private int maxFrameWidth = 0;
+    private int maxFrameHeight = 0;
     private State state = State.IDLE;
     private double fps = 8.0, t = 0.0;
     private int i = 0;
@@ -37,8 +39,21 @@ public class AnimatedSprite {
     public int h() { return drawH; }
 
     public void add(State s, BufferedImage[] frames) {
-        BufferedImage[] normalised = normalise(frames);
-        if (normalised != null && normalised.length > 0) states.put(s, normalised);
+        BufferedImage[] normalised = normaliseFrames(frames);
+        if (normalised != null && normalised.length > 0) {
+            states.put(s, normalised);
+            for (BufferedImage frame : normalised) {
+                if (frame == null) {
+                    continue;
+                }
+                if (frame.getWidth() > maxFrameWidth) {
+                    maxFrameWidth = frame.getWidth();
+                }
+                if (frame.getHeight() > maxFrameHeight) {
+                    maxFrameHeight = frame.getHeight();
+                }
+            }
+        }
     }
 
     /** Load frames from a classpath prefix: /path/name_f  -> name_f0.png ... */
@@ -191,7 +206,7 @@ public class AnimatedSprite {
         }
     }
 
-    private static BufferedImage[] normalise(BufferedImage[] frames) {
+    public static BufferedImage[] normaliseFrames(BufferedImage[] frames) {
         if (frames == null || frames.length == 0) {
             return null;
         }
@@ -258,5 +273,13 @@ public class AnimatedSprite {
     public BufferedImage frame() {
         var seq = states.get(state);
         return (seq == null || seq.length == 0) ? null : seq[i % seq.length];
+    }
+
+    public int maxFrameWidth() {
+        return maxFrameWidth;
+    }
+
+    public int maxFrameHeight() {
+        return maxFrameHeight;
     }
 }
