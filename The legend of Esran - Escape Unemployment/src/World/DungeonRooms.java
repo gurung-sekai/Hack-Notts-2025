@@ -2678,6 +2678,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 gg.drawOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
                 drawEnemyWeapon(gg, e);
             }
+            drawEnemyWeapon(gg, e);
         }
 
         if (playerIdleFrames != null && playerIdleFrames.length > 0){
