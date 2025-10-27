@@ -98,6 +98,7 @@ public final class GameLauncher {
     private final IntegrityCheckReport integrityReport;
 
     public static void main(String[] args) {
+        GameSecurity.verifyIntegrity();
         SwingUtilities.invokeLater(() -> {
             GameLauncher launcher = new GameLauncher();
             launcher.show();
