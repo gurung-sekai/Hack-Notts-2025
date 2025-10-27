@@ -7,6 +7,10 @@ plugins {
     id 'application'
 }
 
+repositories {
+    mavenCentral()
+}
+
 static File locateJavaFxLib(Project project) {
     List<File> candidates = [
             project.file("${project.rootDir}/javafx-sdk-21.0.2/lib"),
@@ -100,6 +104,17 @@ tasks.register('runGameLauncher', JavaExec) {
     workingDir = project.projectDir
     jvmArgs '--module-path', javaFxLibDir.absolutePath,
             '--add-modules', 'javafx.controls'
+}
+
+tasks.register('verifySpriteSheets', JavaExec) {
+    group = 'verification'
+    description = 'Slices tricky boss sheets to ensure the automatic slicer stays precise.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'tools.SpriteSheetSlicerVerifier'
+}
+
+tasks.named('check').configure {
+    dependsOn 'verifySpriteSheets'
 }
 
 java {

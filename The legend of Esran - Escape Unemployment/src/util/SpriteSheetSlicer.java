@@ -26,7 +26,7 @@ public final class SpriteSheetSlicer {
                           int minFrameArea,
                           int joinGap,
                           int haloPasses) {
-        public static final Options DEFAULT = new Options(64, 24, 2, 120, 1, 1);
+        public static final Options DEFAULT = new Options(64, 24, 2, 120, 0, 1);
 
         public Options {
             if (backgroundTolerance < 0) throw new IllegalArgumentException("backgroundTolerance must be >= 0");
@@ -80,13 +80,14 @@ public final class SpriteSheetSlicer {
         }
 
         List<FrameBounds> rawFrames = findFrames(clean, opts);
-        if (rawFrames.isEmpty()) {
+        List<FrameBounds> refined = refineFrames(clean, rawFrames, opts);
+        if (refined.isEmpty()) {
             BufferedImage copy = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
             copy.setRGB(0, 0, width, height, clean.pixels(), 0, width);
             return new BufferedImage[]{copy};
         }
 
-        List<FrameBounds> frames = mergeBounds(rawFrames, opts);
+        List<FrameBounds> frames = mergeBounds(refined, opts);
         frames.sort((a, b) -> {
             int cmp = Integer.compare(a.minY(), b.minY());
             if (cmp == 0) {
@@ -384,7 +385,7 @@ public final class SpriteSheetSlicer {
             queue.add(idx);
 
             int minX = width, minY = height, maxX = -1, maxY = -1;
-            int pixelCount = 0;
+            IntArrayBuilder indices = new IntArrayBuilder();
 
             while (!queue.isEmpty()) {
                 int current = queue.removeFirst();
@@ -395,7 +396,7 @@ public final class SpriteSheetSlicer {
                 if (cy < minY) minY = cy;
                 if (cx > maxX) maxX = cx;
                 if (cy > maxY) maxY = cy;
-                pixelCount++;
+                indices.add(current);
 
                 if (cx > 0) tryVisit(queue, visited, pixels, width, current - 1);
                 if (cx + 1 < width) tryVisit(queue, visited, pixels, width, current + 1);
@@ -407,7 +408,7 @@ public final class SpriteSheetSlicer {
                 continue;
             }
 
-            FrameBounds candidate = new FrameBounds(minX, minY, maxX, maxY, pixelCount);
+            FrameBounds candidate = new FrameBounds(minX, minY, maxX, maxY, indices.toArray());
             if (isEdgeMatte(candidate, width, height)) {
                 continue;
             }
@@ -415,7 +416,7 @@ public final class SpriteSheetSlicer {
                     && (candidate.width() < 32 || candidate.height() < 32)) {
                 continue;
             }
-            if (candidate.area() < opts.minFrameArea() && pixelCount < opts.minFrameArea()) {
+            if (candidate.area() < opts.minFrameArea() && candidate.pixelCount() < opts.minFrameArea()) {
                 continue;
             }
             frames.add(candidate);
@@ -438,10 +439,11 @@ public final class SpriteSheetSlicer {
         }
     }
 
-    private record FrameBounds(int minX, int minY, int maxX, int maxY, int pixelCount) {
+    private record FrameBounds(int minX, int minY, int maxX, int maxY, int[] pixels) {
         int width() { return maxX - minX + 1; }
         int height() { return maxY - minY + 1; }
         int area() { return width() * height(); }
+        int pixelCount() { return pixels.length; }
 
         FrameBounds expand(int padding, int sheetWidth, int sheetHeight) {
             if (padding <= 0) {
@@ -451,7 +453,7 @@ public final class SpriteSheetSlicer {
             int newMinY = Math.max(0, minY - padding);
             int newMaxX = Math.min(sheetWidth - 1, maxX + padding);
             int newMaxY = Math.min(sheetHeight - 1, maxY + padding);
-            return new FrameBounds(newMinX, newMinY, newMaxX, newMaxY, pixelCount);
+            return new FrameBounds(newMinX, newMinY, newMaxX, newMaxY, pixels);
         }
 
         FrameBounds merge(FrameBounds other) {
@@ -459,7 +461,9 @@ public final class SpriteSheetSlicer {
             int newMinY = Math.min(this.minY, other.minY);
             int newMaxX = Math.max(this.maxX, other.maxX);
             int newMaxY = Math.max(this.maxY, other.maxY);
-            return new FrameBounds(newMinX, newMinY, newMaxX, newMaxY, this.pixelCount + other.pixelCount);
+            int[] mergedPixels = Arrays.copyOf(pixels, pixelCount() + other.pixelCount());
+            System.arraycopy(other.pixels, 0, mergedPixels, pixelCount(), other.pixelCount());
+            return new FrameBounds(newMinX, newMinY, newMaxX, newMaxY, mergedPixels);
         }
 
         boolean touches(FrameBounds other, int gap) {
@@ -501,7 +505,11 @@ public final class SpriteSheetSlicer {
                 for (int j = i + 1; j < working.size(); j++) {
                     FrameBounds b = working.get(j);
                     if (a.touches(b, gap)) {
-                        working.set(i, a.merge(b));
+                        FrameBounds candidate = a.merge(b);
+                        if (!shouldMerge(a, b, candidate)) {
+                            continue;
+                        }
+                        working.set(i, candidate);
                         working.remove(j);
                         merged = true;
                         break outer;
@@ -510,6 +518,267 @@ public final class SpriteSheetSlicer {
             }
         } while (merged);
         return working;
+    }
+
+    private static boolean shouldMerge(FrameBounds a, FrameBounds b, FrameBounds merged) {
+        double densityA = a.pixelCount() <= 0 ? 0.0 : (double) a.pixelCount() / a.area();
+        double densityB = b.pixelCount() <= 0 ? 0.0 : (double) b.pixelCount() / b.area();
+        double mergedDensity = merged.pixelCount() <= 0 ? 0.0 : (double) merged.pixelCount() / merged.area();
+        double minDensity = Math.min(densityA, densityB);
+        if (mergedDensity < minDensity * 0.55) {
+            return false;
+        }
+        long combinedArea = (long) a.area() + (long) b.area();
+        if (merged.area() > combinedArea * 1.25 + 16) {
+            return false;
+        }
+        return true;
+    }
+
+    private static List<FrameBounds> refineFrames(CleanSheet clean, List<FrameBounds> frames, Options opts) {
+        if (frames.isEmpty()) {
+            return frames;
+        }
+        List<FrameBounds> refined = new ArrayList<>(frames.size());
+        for (FrameBounds frame : frames) {
+            splitComponentRecursive(clean, frame, opts, refined, 0);
+        }
+        return refined;
+    }
+
+    private static void splitComponentRecursive(CleanSheet clean,
+                                                FrameBounds frame,
+                                                Options opts,
+                                                List<FrameBounds> out,
+                                                int depth) {
+        if (frame.pixelCount() == 0) {
+            return;
+        }
+        if (depth >= 6) {
+            out.add(frame);
+            return;
+        }
+        List<FrameBounds> split = attemptSplit(clean, frame, opts);
+        if (split == null || split.isEmpty()) {
+            out.add(frame);
+            return;
+        }
+        for (FrameBounds child : split) {
+            splitComponentRecursive(clean, child, opts, out, depth + 1);
+        }
+    }
+
+    private static List<FrameBounds> attemptSplit(CleanSheet clean, FrameBounds frame, Options opts) {
+        int sheetWidth = clean.width();
+        int sheetHeight = clean.height();
+        if (frame.width() < 4 && frame.height() < 4) {
+            return null;
+        }
+
+        SeamSplit vertical = findVerticalSplit(clean, frame);
+        SeamSplit horizontal = findHorizontalSplit(clean, frame);
+
+        SeamSplit chosen = null;
+        if (vertical != null && horizontal != null) {
+            chosen = vertical.score() <= horizontal.score() ? vertical : horizontal;
+        } else if (vertical != null) {
+            chosen = vertical;
+        } else if (horizontal != null) {
+            chosen = horizontal;
+        }
+
+        if (chosen == null) {
+            return null;
+        }
+
+        List<FrameBounds> children = new ArrayList<>();
+        for (int[] indices : chosen.parts()) {
+            FrameBounds child = frameFromIndices(indices, sheetWidth);
+            if (child == null) {
+                continue;
+            }
+            if (isEdgeMatte(child, sheetWidth, sheetHeight)) {
+                continue;
+            }
+            if (child.area() < opts.minFrameArea() && child.pixelCount() < opts.minFrameArea()) {
+                continue;
+            }
+            children.add(child);
+        }
+
+        if (children.size() <= 1) {
+            return null;
+        }
+        return children;
+    }
+
+    private static SeamSplit findVerticalSplit(CleanSheet clean, FrameBounds frame) {
+        if (frame.width() < 4) {
+            return null;
+        }
+        int sheetWidth = clean.width();
+        int width = frame.width();
+        int height = frame.height();
+        int[] counts = new int[width];
+        for (int idx : frame.pixels()) {
+            int x = idx % sheetWidth - frame.minX();
+            counts[x]++;
+        }
+        return findSeam(frame, counts, width, height, sheetWidth, true);
+    }
+
+    private static SeamSplit findHorizontalSplit(CleanSheet clean, FrameBounds frame) {
+        if (frame.height() < 4) {
+            return null;
+        }
+        int sheetWidth = clean.width();
+        int width = frame.width();
+        int height = frame.height();
+        int[] counts = new int[height];
+        for (int idx : frame.pixels()) {
+            int y = idx / sheetWidth - frame.minY();
+            counts[y]++;
+        }
+        return findSeam(frame, counts, height, width, sheetWidth, false);
+    }
+
+    private static SeamSplit findSeam(FrameBounds frame,
+                                      int[] counts,
+                                      int length,
+                                      int orthogonalLength,
+                                      int sheetWidth,
+                                      boolean vertical) {
+        if (length < 4) {
+            return null;
+        }
+        int totalPixels = frame.pixelCount();
+        double averagePerSlice = (double) totalPixels / length;
+        double density = totalPixels / (double) frame.area();
+        double adaptiveFactor = density < 0.25 ? 0.22 : 0.12;
+        int threshold = Math.max(1, (int) Math.floor(averagePerSlice * adaptiveFactor));
+        threshold = Math.min(threshold, Math.max(orthogonalLength / 48, 2));
+        int minRun = Math.max(1, orthogonalLength / 64);
+        if (minRun > length / 2) {
+            minRun = Math.max(1, length / 3);
+        }
+
+        SeamSplit best = null;
+        int runStart = 0;
+        while (runStart < length) {
+            while (runStart < length && counts[runStart] > threshold) {
+                runStart++;
+            }
+            if (runStart >= length) {
+                break;
+            }
+            int runEnd = runStart;
+            int runMax = 0;
+            int runSum = 0;
+            while (runEnd < length && counts[runEnd] <= threshold) {
+                runSum += counts[runEnd];
+                if (counts[runEnd] > runMax) {
+                    runMax = counts[runEnd];
+                }
+                runEnd++;
+            }
+            int runLength = runEnd - runStart;
+            if (runLength >= minRun && runStart > 0 && runEnd < length) {
+                double seamWeight = (runSum + 1.0) / (averagePerSlice * runLength + 1.0);
+                double edgePenalty = Math.min(runStart, length - runEnd) / (double) length;
+                double score = seamWeight - edgePenalty * 0.25;
+                if (runSum > totalPixels * 0.06) {
+                    score += 0.35;
+                }
+                List<int[]> parts = splitByRun(frame, sheetWidth, runStart, runEnd, vertical);
+                if (parts.size() > 1) {
+                    SeamSplit candidate = new SeamSplit(parts, score);
+                    if (best == null || candidate.score() + 1e-6 < best.score()) {
+                        best = candidate;
+                    }
+                }
+            }
+            runStart = runEnd + 1;
+        }
+        return best;
+    }
+
+    private static List<int[]> splitByRun(FrameBounds frame,
+                                          int sheetWidth,
+                                          int runStart,
+                                          int runEnd,
+                                          boolean vertical) {
+        int seamStart = vertical ? frame.minX() + runStart : frame.minY() + runStart;
+        int seamEnd = vertical ? frame.minX() + runEnd - 1 : frame.minY() + runEnd - 1;
+        IntArrayBuilder first = new IntArrayBuilder();
+        IntArrayBuilder second = new IntArrayBuilder();
+        for (int idx : frame.pixels()) {
+            int coord = vertical ? idx % sheetWidth : idx / sheetWidth;
+            if (coord < seamStart) {
+                first.add(idx);
+            } else if (coord > seamEnd) {
+                second.add(idx);
+            } else {
+                int distToStart = coord - seamStart;
+                int distToEnd = seamEnd - coord;
+                if (distToStart <= distToEnd) {
+                    first.add(idx);
+                } else {
+                    second.add(idx);
+                }
+            }
+        }
+        List<int[]> parts = new ArrayList<>(2);
+        if (first.size() > 0) {
+            parts.add(first.toArray());
+        }
+        if (second.size() > 0) {
+            parts.add(second.toArray());
+        }
+        return parts;
+    }
+
+    private static FrameBounds frameFromIndices(int[] indices, int sheetWidth) {
+        if (indices == null || indices.length == 0) {
+            return null;
+        }
+        int minX = sheetWidth;
+        int minY = Integer.MAX_VALUE;
+        int maxX = -1;
+        int maxY = -1;
+        for (int idx : indices) {
+            int x = idx % sheetWidth;
+            int y = idx / sheetWidth;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+        }
+        if (maxX < minX || maxY < minY) {
+            return null;
+        }
+        return new FrameBounds(minX, minY, maxX, maxY, indices);
+    }
+
+    private record SeamSplit(List<int[]> parts, double score) { }
+
+    private static final class IntArrayBuilder {
+        private int[] data = new int[64];
+        private int size;
+
+        void add(int value) {
+            if (size == data.length) {
+                data = Arrays.copyOf(data, data.length * 2);
+            }
+            data[size++] = value;
+        }
+
+        int size() {
+            return size;
+        }
+
+        int[] toArray() {
+            return size == data.length ? data : Arrays.copyOf(data, size);
+        }
     }
 
     private record CleanSheet(int width, int height, int[] pixels) {}
