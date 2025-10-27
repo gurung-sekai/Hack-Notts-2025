@@ -41,12 +41,19 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final double playerDamageBuffer;
     private final int iFrames;
     private final int keysHeld;
+    private final int coins;
     private final String statusMessage;
     private final int statusTicks;
     private final boolean inBoss;
     private final int animTick;
     private final int mouseX;
     private final int mouseY;
+    private final Point shopRoom;
+    private final DungeonRooms.Dir shopDoorFacing;
+    private final boolean shopInitialized;
+    private final boolean goldenKnightIntroShown;
+    private final boolean queenRescued;
+    private final boolean finaleShown;
     private final Random rng;
     private final SecureRandom secureRandom;
 
@@ -69,12 +76,19 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          double playerDamageBuffer,
                          int iFrames,
                          int keysHeld,
+                         int coins,
                          String statusMessage,
                          int statusTicks,
                          boolean inBoss,
                          int animTick,
                          int mouseX,
                          int mouseY,
+                         Point shopRoom,
+                         DungeonRooms.Dir shopDoorFacing,
+                         boolean shopInitialized,
+                         boolean goldenKnightIntroShown,
+                         boolean queenRescued,
+                         boolean finaleShown,
                          Random rng,
                          SecureRandom secureRandom) {
         this.world = copyRooms(world);
@@ -96,12 +110,19 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.playerDamageBuffer = playerDamageBuffer;
         this.iFrames = iFrames;
         this.keysHeld = keysHeld;
+        this.coins = coins;
         this.statusMessage = statusMessage;
         this.statusTicks = statusTicks;
         this.inBoss = inBoss;
         this.animTick = animTick;
         this.mouseX = mouseX;
         this.mouseY = mouseY;
+        this.shopRoom = shopRoom == null ? null : new Point(shopRoom);
+        this.shopDoorFacing = shopDoorFacing;
+        this.shopInitialized = shopInitialized;
+        this.goldenKnightIntroShown = goldenKnightIntroShown;
+        this.queenRescued = queenRescued;
+        this.finaleShown = finaleShown;
         this.rng = rng == null ? null : copyRandom(rng);
         this.secureRandom = secureRandom == null ? null : copySecureRandom(secureRandom);
     }
@@ -182,6 +203,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return keysHeld;
     }
 
+    public int coins() {
+        return coins;
+    }
+
     public String statusMessage() {
         return statusMessage;
     }
@@ -204,6 +229,30 @@ public final class DungeonRoomsSnapshot implements Serializable {
 
     public int mouseY() {
         return mouseY;
+    }
+
+    public Point shopRoom() {
+        return shopRoom == null ? null : new Point(shopRoom);
+    }
+
+    public DungeonRooms.Dir shopDoorFacing() {
+        return shopDoorFacing;
+    }
+
+    public boolean shopInitialized() {
+        return shopInitialized;
+    }
+
+    public boolean goldenKnightIntroShown() {
+        return goldenKnightIntroShown;
+    }
+
+    public boolean queenRescued() {
+        return queenRescued;
+    }
+
+    public boolean finaleShown() {
+        return finaleShown;
     }
 
     public Random rng() {
@@ -236,12 +285,20 @@ public final class DungeonRoomsSnapshot implements Serializable {
         clone.doors.addAll(room.doors);
         clone.enemies = copyEnemies(room.enemies);
         clone.keyPickups = copyKeys(room.keyPickups);
+        clone.coinPickups = copyCoins(room.coinPickups);
         clone.enemySpawns = copyEnemySpawns(room.enemySpawns);
         clone.lockedDoors = room.lockedDoors.clone();
         clone.cleared = room.cleared;
         clone.spawnsPrepared = room.spawnsPrepared;
         clone.floorThemeSeed = room.floorThemeSeed;
         clone.wallThemeSeed = room.wallThemeSeed;
+        clone.paletteIndex = room.paletteIndex;
+        clone.accentSeed = room.accentSeed;
+        clone.shopDoor = room.shopDoor;
+        clone.shopVisited = room.shopVisited;
+        clone.backgroundDirty = true;
+        clone.cachedBackground = null;
+        clone.cachedTextureEpoch = -1;
         return clone;
     }
 
@@ -272,13 +329,13 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return result;
     }
 
-    private static List<DungeonRooms.Enemy> copyEnemies(List<DungeonRooms.Enemy> enemies) {
-        List<DungeonRooms.Enemy> list = new ArrayList<>();
+    private static List<DungeonRooms.RoomEnemy> copyEnemies(List<DungeonRooms.RoomEnemy> enemies) {
+        List<DungeonRooms.RoomEnemy> list = new ArrayList<>();
         if (enemies == null) {
             return list;
         }
-        for (DungeonRooms.Enemy enemy : enemies) {
-            DungeonRooms.Enemy e = new DungeonRooms.Enemy();
+        for (DungeonRooms.RoomEnemy enemy : enemies) {
+            DungeonRooms.RoomEnemy e = new DungeonRooms.RoomEnemy();
             e.x = enemy.x;
             e.y = enemy.y;
             e.size = enemy.size;
@@ -291,6 +348,13 @@ public final class DungeonRoomsSnapshot implements Serializable {
             e.windup = enemy.windup;
             e.patternIndex = enemy.patternIndex;
             e.damageBuffer = enemy.damageBuffer;
+            e.weapon = enemy.weapon;
+            e.attackAnimTicks = enemy.attackAnimTicks;
+            e.attackAnimDuration = enemy.attackAnimDuration;
+            e.bowDrawTicks = enemy.bowDrawTicks;
+            e.facingAngle = enemy.facingAngle;
+            e.weaponAngle = enemy.weaponAngle;
+            e.coinReward = enemy.coinReward;
             if (enemy.spawn != null) {
                 DungeonRooms.EnemySpawn spawn = new DungeonRooms.EnemySpawn();
                 spawn.x = enemy.spawn.x;
@@ -315,6 +379,23 @@ public final class DungeonRoomsSnapshot implements Serializable {
             k.y = key.y;
             k.r = key.r;
             list.add(k);
+        }
+        return list;
+    }
+
+    private static List<DungeonRooms.CoinPickup> copyCoins(List<DungeonRooms.CoinPickup> coins) {
+        List<DungeonRooms.CoinPickup> list = new ArrayList<>();
+        if (coins == null) {
+            return list;
+        }
+        for (DungeonRooms.CoinPickup coin : coins) {
+            DungeonRooms.CoinPickup c = new DungeonRooms.CoinPickup();
+            c.x = coin.x;
+            c.y = coin.y;
+            c.r = coin.r;
+            c.value = coin.value;
+            c.animTick = coin.animTick;
+            list.add(c);
         }
         return list;
     }
@@ -357,6 +438,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
             b.explosive = bullet.explosive;
             b.explosionRadius = bullet.explosionRadius;
             b.explosionLife = bullet.explosionLife;
+            b.kind = bullet.kind;
             list.add(b);
         }
         return list;
