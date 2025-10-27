@@ -96,6 +96,9 @@ public class BossBattlePanel extends JPanel {
     private final List<BattleMessage> battleMessages = new ArrayList<>();
 
     private final BufferedImage floorTile;
+    private BufferedImage floorCache;
+    private int floorCacheWidth = -1;
+    private int floorCacheHeight = -1;
     private final Timer animationTimer;
 
     private long lastTickNs = 0;
@@ -139,6 +142,8 @@ public class BossBattlePanel extends JPanel {
         });
 
         animationTimer = new Timer(1000 / 60, e -> tick());
+        animationTimer.setInitialDelay(0);
+        animationTimer.setCoalesce(true);
         animationTimer.start();
     }
 
@@ -380,14 +385,46 @@ public class BossBattlePanel extends JPanel {
     private record FrameSize(int width, int height) { }
 
     private void drawFloor(Graphics2D g2) {
-        if (floorTile == null) return;
-        int tileW = floorTile.getWidth();
-        int tileH = floorTile.getHeight();
-        for (int x = 0; x < getWidth(); x += tileW) {
-            for (int y = 0; y < getHeight(); y += tileH) {
-                g2.drawImage(floorTile, x, y, null);
-            }
+        if (floorTile == null) {
+            return;
         }
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        ensureFloorCache(width, height);
+        if (floorCache != null) {
+            g2.drawImage(floorCache, 0, 0, null);
+        }
+    }
+
+    private void ensureFloorCache(int width, int height) {
+        if (floorTile == null || width <= 0 || height <= 0) {
+            floorCache = null;
+            floorCacheWidth = -1;
+            floorCacheHeight = -1;
+            return;
+        }
+        if (floorCache != null && floorCacheWidth == width && floorCacheHeight == height) {
+            return;
+        }
+        int tileSize = Math.max(64, Math.min(128, Math.max(width, height) / 8));
+        BufferedImage tile = HiDpiScaler.scale(floorTile, tileSize, tileSize);
+        BufferedImage cache = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = cache.createGraphics();
+        try {
+            for (int x = 0; x < width; x += tile.getWidth()) {
+                for (int y = 0; y < height; y += tile.getHeight()) {
+                    g.drawImage(tile, x, y, null);
+                }
+            }
+        } finally {
+            g.dispose();
+        }
+        floorCache = cache;
+        floorCacheWidth = width;
+        floorCacheHeight = height;
     }
 
     private void drawEffectsBehind(Graphics2D g2) {
