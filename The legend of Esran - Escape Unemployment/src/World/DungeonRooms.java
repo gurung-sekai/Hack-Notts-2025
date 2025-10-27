@@ -155,6 +155,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private static final int MESSAGE_SECONDS = 3;
+    private static final int MAX_PLAYER_HP = 5;
+    private static final int HEAL_FLASH_TICKS = FPS * 2;
     private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
     private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
     private static final String BOSS_IDLE_PREFIX = "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
@@ -195,8 +197,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private final List<Bullet> bullets = new ArrayList<>();       // enemy bullets
     private final List<Bullet> playerBullets = new ArrayList<>(); // player bullets
     private final List<Explosion> explosions = new ArrayList<>();
-    private int playerHP = 5;
+    private int playerHP = MAX_PLAYER_HP;
     private int iFrames = 0;
+    private int healTicks = 0;
     private int keysHeld = 0;
     private String statusMessage = "";
     private int statusTicks = 0;
@@ -266,7 +269,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playerBullets.clear();
         explosions.clear();
         up = down = left = right = false;
-        playerHP = 5;
+        playerHP = MAX_PLAYER_HP;
         iFrames = 0;
         keysHeld = 0;
         statusMessage = "";
@@ -751,7 +754,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (encounter == null || encounter.rewardClaimed) return;
         encounter.rewardClaimed = true;
         keysHeld++;
-        showMessage(texts.text("victory_key", keysHeld));
+        playerHP = MAX_PLAYER_HP;
+        showMessage(texts.text("victory_heal", keysHeld, MAX_PLAYER_HP));
+        healTicks = HEAL_FLASH_TICKS;
     }
 
     private static String formatBossName(BossBattlePanel.BossKind kind) {
@@ -785,7 +790,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private void onPlayerDeath() {
         SwingUtilities.invokeLater(() -> {
             // Respawn at origin room with full HP and brief invulnerability
-            playerHP = 5;
+            playerHP = MAX_PLAYER_HP;
             iFrames = 60;
             up = down = left = right = false;
             inBoss = false;
@@ -1036,6 +1041,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         animTick++;
         if (iFrames > 0) iFrames--;
+        if (healTicks > 0) healTicks--;
         updatePlayer();
         updateCombat();
         checkKeyPickup();
@@ -1321,6 +1327,33 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         } else {
             gg.setColor(new Color(255,214,102));
             gg.fillOval(player.x,player.y,player.width,player.height);
+        }
+
+        if (healTicks > 0) {
+            float phase = healTicks / (float) HEAL_FLASH_TICKS;
+            int radius = (int) (Math.max(player.width, player.height) * (1.2f + (1.0f - phase) * 1.6f));
+            int centerX = player.x + player.width / 2;
+            int centerY = player.y + player.height / 2;
+            java.awt.Paint oldPaint = gg.getPaint();
+            java.awt.Composite oldComposite = gg.getComposite();
+            RadialGradientPaint aura = new RadialGradientPaint(
+                    new Point2D.Float(centerX, centerY),
+                    Math.max(1, radius),
+                    new float[]{0f, 0.45f, 1f},
+                    new Color[]{
+                            new Color(120, 255, 160, 200),
+                            new Color(60, 200, 120, 90),
+                            new Color(30, 120, 80, 0)
+                    }
+            );
+            gg.setComposite(AlphaComposite.SrcOver.derive(0.8f));
+            gg.setPaint(aura);
+            gg.fillOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
+            gg.setComposite(oldComposite);
+            gg.setPaint(oldPaint);
+            gg.setColor(new Color(120, 255, 160, 180));
+            gg.setStroke(new BasicStroke(2f));
+            gg.drawOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
         }
 
         gg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);

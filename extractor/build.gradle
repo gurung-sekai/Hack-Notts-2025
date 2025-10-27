@@ -1,0 +1,92 @@
+import org.gradle.api.Project
+import org.gradle.api.tasks.compile.JavaCompile
+import java.io.File
+
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+static File locateJavaFxLib(Project project) {
+    List<File> candidates = [
+            project.file("${project.rootDir}/javafx-sdk-21.0.2/lib"),
+            project.file("${project.rootDir}/javafx-sdk-25.0.1/lib"),
+            project.file("${project.rootDir}/javafx-sdk/lib"),
+            project.file("${project.projectDir}/../javafx-sdk-21.0.2/lib"),
+            project.file("${project.projectDir}/../javafx-sdk-25.0.1/lib"),
+            project.file("${project.projectDir}/../javafx-sdk/lib"),
+            project.file("${project.projectDir}/../'The legend of Esran - Escape Unemployment'/javafx-sdk-21.0.2/lib"),
+            project.file("${project.projectDir}/../'The legend of Esran - Escape Unemployment'/javafx-sdk-25.0.1/lib"),
+            project.file("${project.projectDir}/../'The legend of Esran - Escape Unemployment'/javafx-sdk/lib")
+    ]
+    return candidates.find { it.exists() && it.isDirectory() }
+}
+
+File javaFxLibDir = locateJavaFxLib(project)
+if (javaFxLibDir == null) {
+    throw new GradleException('JavaFX SDK jars not found. Place an extracted sdk under javafx-sdk-*/lib relative to the repo root.')
+}
+
+def javaFxJars = javaFxLibDir.listFiles()?.findAll { it.name.endsWith('.jar') } ?: []
+if (javaFxJars.isEmpty()) {
+    throw new GradleException("JavaFX SDK directory ${javaFxLibDir} does not contain any .jar files.")
+}
+
+dependencies {
+    implementation files(javaFxJars)
+}
+
+application {
+    mainClass = 'com.hacknotts.extractor.SpriteSheetExtractorLauncher'
+    applicationDefaultJvmArgs = [
+            '--module-path', javaFxLibDir.absolutePath,
+            '--add-modules', 'javafx.controls,javafx.graphics,javafx.swing'
+    ]
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+sourceSets {
+    main {
+        java.srcDir 'src/main/java'
+        resources.srcDir 'src/main/resources'
+    }
+    test {
+        java.srcDir 'src/test/java'
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+compileJava {
+    options.compilerArgs += ['-Xlint:deprecation', '-Xlint:unchecked']
+}
+
+tasks.withType(Test).configureEach {
+    enabled = false
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs '--module-path', javaFxLibDir.absolutePath,
+            '--add-modules', 'javafx.controls,javafx.graphics,javafx.swing'
+}
+
+tasks.register('acceptanceTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs the lightweight acceptance suite without external test engines.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.hacknotts.extractor.AcceptanceTestRunner'
+}
+
+tasks.named('check').configure {
+    dependsOn 'acceptanceTest'
+}

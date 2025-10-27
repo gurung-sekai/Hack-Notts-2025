@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 import util.ResourceLoader;
+import util.SpriteSplitLocator;
 
 /**
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
@@ -592,7 +593,14 @@ public class BossBattlePanel extends JPanel {
 
     private static SpriteSource sheetSource(String resourcePath) {
         Objects.requireNonNull(resourcePath, "resourcePath");
-        return sprite -> sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath);
+        return sprite -> {
+            for (String prefix : SpriteSplitLocator.candidates(resourcePath)) {
+                if (sprite.addFromPrefix(AnimatedSprite.State.IDLE, prefix)) {
+                    return;
+                }
+            }
+            sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath);
+        };
     }
 
     // ---------------------------------------------------------------------
