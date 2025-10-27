@@ -1,20 +1,14 @@
 package fx;
 
 import gfx.AnimatedSprite;
-import util.SpriteSheetSlicer;
-import util.SpriteSplitLocator;
 
 import java.awt.image.BufferedImage;
-import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 
-/** Utility for loading boss attack animations without storing split PNGs in git. */
+/** Utility for loading boss attack animations from authored frame sequences. */
 public final class BossFXLibrary {
-    private static final SpriteSheetSlicer.Options ATTACK_OPTIONS = SpriteSheetSlicer.Options.DEFAULT
-            .withPadding(1)
-            .withAlphaThreshold(10)
-            .withMinFrameArea(96)
-            .withJoinGap(2);
-
     private BossFXLibrary() {
     }
 
@@ -24,19 +18,14 @@ public final class BossFXLibrary {
 
     public static FrameAnim attack(String attackId, double fps, boolean loop) {
         String normalized = normalize(attackId);
-        String resourcePath = "/resources/bosses/attacks/" + normalized + ".png";
-        for (String prefix : SpriteSplitLocator.candidates(resourcePath)) {
-            BufferedImage[] frames = AnimatedSprite.loadFramesFromPrefix(prefix);
+        String base = "/resources/bosses/attacks/" + normalized;
+        for (String candidate : attackDirectories(base)) {
+            BufferedImage[] frames = AnimatedSprite.loadFramesFromDirectory(candidate);
             if (frames.length > 0) {
                 return FrameAnim.fromFrames(frames, fps, loop);
             }
         }
-        try {
-            BufferedImage[] frames = SpriteSheetSlicer.slice(resourcePath, ATTACK_OPTIONS);
-            return FrameAnim.fromFrames(frames, fps, loop);
-        } catch (IOException e) {
-            throw new RuntimeException("Missing boss attack sheet: " + attackId, e);
-        }
+        throw new IllegalStateException("Missing boss attack frames for: " + attackId);
     }
 
     private static String normalize(String attackId) {
@@ -44,5 +33,25 @@ public final class BossFXLibrary {
             throw new IllegalArgumentException("attackId must not be blank");
         }
         return attackId.trim().replace(' ', '_');
+    }
+
+    private static List<String> attackDirectories(String base) {
+        LinkedHashSet<String> dirs = new LinkedHashSet<>();
+        dirs.add(base);
+        dirs.add(adjustCase(base, true));
+        dirs.add(adjustCase(base, false));
+        return new ArrayList<>(dirs);
+    }
+
+    private static String adjustCase(String value, boolean lowerFirst) {
+        if (value.length() < 1) {
+            return value;
+        }
+        char first = value.charAt(0);
+        char adjusted = lowerFirst ? Character.toLowerCase(first) : Character.toUpperCase(first);
+        if (adjusted == first) {
+            return value;
+        }
+        return adjusted + value.substring(1);
     }
 }

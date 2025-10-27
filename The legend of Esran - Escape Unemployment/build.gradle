@@ -106,27 +106,6 @@ tasks.register('runGameLauncher', JavaExec) {
             '--add-modules', 'javafx.controls'
 }
 
-tasks.register('verifySpriteSheets', JavaExec) {
-    group = 'verification'
-    description = 'Slices tricky boss sheets to ensure the automatic slicer stays precise.'
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'tools.SpriteSheetSlicerVerifier'
-}
-
-tasks.register('exportSpriteSlices', JavaExec) {
-    group = 'verification'
-    description = 'Exports sliced boss sprites to the build directory for manual review.'
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'tools.SpriteSheetSliceExporter'
-    doFirst {
-        setArgs([layout.buildDirectory.dir('slicerPreview').get().asFile.absolutePath])
-    }
-}
-
-tasks.named('check').configure {
-    dependsOn 'verifySpriteSheets'
-}
-
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)

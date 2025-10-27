@@ -20,7 +20,6 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 import util.ResourceLoader;
-import util.SpriteSplitLocator;
 
 /**
  * Boss battle swing panel featuring textured fighters, screen-space FX, and the shared battle ruleset.
@@ -591,15 +590,12 @@ public class BossBattlePanel extends JPanel {
         return sprite -> sprite.addFromPrefix(AnimatedSprite.State.IDLE, prefix);
     }
 
-    private static SpriteSource sheetSource(String resourcePath) {
-        Objects.requireNonNull(resourcePath, "resourcePath");
+    private static SpriteSource directorySource(String resourceDirectory) {
+        Objects.requireNonNull(resourceDirectory, "resourceDirectory");
         return sprite -> {
-            for (String prefix : SpriteSplitLocator.candidates(resourcePath)) {
-                if (sprite.addFromPrefix(AnimatedSprite.State.IDLE, prefix)) {
-                    return;
-                }
+            if (!sprite.addFromDirectory(AnimatedSprite.State.IDLE, resourceDirectory)) {
+                throw new IllegalStateException("Missing boss sprite frames for: " + resourceDirectory);
             }
-            sprite.addFromSheet(AnimatedSprite.State.IDLE, resourcePath);
         };
     }
 
@@ -700,21 +696,21 @@ public class BossBattlePanel extends JPanel {
                 case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
                         new Stats(265, 17, 21, 9), prefixSource("/resources/sprites/Bigzombie/big_zombie_idle_anim_f"), 3.8, 0.88, 1.12, -1);
                 case GOLLUM -> new BossDefinition("Gollum", Affinity.STORM,
-                        new Stats(205, 23, 13, 27), sheetSource("/resources/bosses/gollum.png"), 1.6, 1.05, 0.92, 1);
+                        new Stats(205, 23, 13, 27), directorySource("/resources/bosses/Gollum"), 1.6, 1.05, 0.92, 1);
                 case GRIM -> new BossDefinition("Grim", Affinity.STONE,
-                        new Stats(245, 26, 18, 18), sheetSource("/resources/bosses/grim.png"), 1.5, 1.1, 1.05, 0);
+                        new Stats(245, 26, 18, 18), directorySource("/resources/bosses/Grim"), 1.5, 1.1, 1.05, 0);
                 case FIRE_FLINGER -> new BossDefinition("Fire Flinger", Affinity.EMBER,
-                        new Stats(215, 24, 14, 23), sheetSource("/resources/bosses/fireFlinger.png"), 1.1, 1.08, 0.95, 1);
+                        new Stats(215, 24, 14, 23), directorySource("/resources/bosses/fireFlinger"), 1.1, 1.08, 0.95, 1);
                 case GOLD_MECH -> new BossDefinition("Gold Mech", Affinity.STONE,
-                        new Stats(320, 28, 25, 12), sheetSource("/resources/bosses/goldMech.png"), 0.6, 1.05, 1.15, -1);
+                        new Stats(320, 28, 25, 12), directorySource("/resources/bosses/goldMech"), 0.6, 1.05, 1.15, -1);
                 case GOLDEN_KNIGHT -> new BossDefinition("Golden Knight", Affinity.STONE,
-                        new Stats(260, 27, 22, 16), sheetSource("/resources/bosses/goldenKnight.png"), 1.3, 1.1, 1.08, 0);
+                        new Stats(260, 27, 22, 16), directorySource("/resources/bosses/goldenKnight"), 1.3, 1.1, 1.08, 0);
                 case PURPLE_EMPRESS -> new BossDefinition("Purple Empress", Affinity.STORM,
-                        new Stats(210, 25, 15, 25), sheetSource("/resources/bosses/purpleEmpress.png"), 0.85, 1.12, 0.96, 1);
+                        new Stats(210, 25, 15, 25), directorySource("/resources/bosses/purpleEmpress"), 0.85, 1.12, 0.96, 1);
                 case THE_WELCH -> new BossDefinition("The Welch", Affinity.STORM,
-                        new Stats(285, 22, 20, 18), sheetSource("/resources/bosses/theWelch.png"), 0.55, 1.0, 1.05, 0);
+                        new Stats(285, 22, 20, 18), directorySource("/resources/bosses/theWelch"), 0.55, 1.0, 1.05, 0);
                 case TOXIC_TREE -> new BossDefinition("Toxic Tree", Affinity.VERDANT,
-                        new Stats(270, 24, 19, 14), sheetSource("/resources/bosses/toxicTree.png"), 1.45, 1.06, 1.1, -1);
+                        new Stats(270, 24, 19, 14), directorySource("/resources/bosses/toxicTree"), 1.45, 1.06, 1.1, -1);
             };
         }
     }
