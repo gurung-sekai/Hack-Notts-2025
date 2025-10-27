@@ -4,6 +4,7 @@ import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
 import World.cutscene.CutsceneDialog;
 import World.cutscene.CutsceneLibrary;
+import World.cutscene.CutsceneScript;
 import World.cutscene.ShopDialog;
 import World.gfx.DungeonTextures;
 import World.ui.UndertaleText;
@@ -102,6 +103,17 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     enum ProjectileKind { ORB, ARROW }
 
+    private static final List<BossBattlePanel.BossKind> STORY_BOSS_SEQUENCE = List.of(
+            BossBattlePanel.BossKind.GOLLUM,
+            BossBattlePanel.BossKind.GRIM,
+            BossBattlePanel.BossKind.FIRE_FLINGER,
+            BossBattlePanel.BossKind.GOLD_MECH,
+            BossBattlePanel.BossKind.PURPLE_EMPRESS,
+            BossBattlePanel.BossKind.THE_WELCH,
+            BossBattlePanel.BossKind.TOXIC_TREE,
+            BossBattlePanel.BossKind.GOLDEN_KNIGHT
+    );
+
     static class RoomEnemy implements Serializable {
         @Serial
         private static final long serialVersionUID = 1L;
@@ -182,10 +194,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     static class BossEncounter implements Serializable {
         @Serial
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
         BossBattlePanel.BossKind kind;
         boolean defeated = false;
         boolean rewardClaimed = false;
+        boolean preludeShown = false;
     }
 
     static class Room implements Serializable {
@@ -346,6 +359,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private boolean shopInitialized = false;
     private boolean suppressNextMovementPress = false;
     private long suppressMovementDeadlineNanos = 0L;
+    private boolean introShown = false;
     private boolean goldenKnightIntroShown = false;
     private boolean queenRescued = false;
     private boolean finaleShown = false;
@@ -426,6 +440,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         goldenKnightIntroShown = false;
         queenRescued = false;
         finaleShown = false;
+        introShown = false;
         refreshArtAssets();
         initializeBossPool();
         room = makeOrGetRoom(worldPos, null);
@@ -434,6 +449,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         visited.add(new Point(worldPos));
         ensureShopDoor(room, worldPos);
         showMessage(texts.text("intro"));
+        SwingUtilities.invokeLater(this::playPrologueIfNeeded);
     }
 
     private void restoreFromSnapshot(DungeonRoomsSnapshot snapshot) {
@@ -481,6 +497,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         goldenKnightIntroShown = snapshot.goldenKnightIntroShown();
         queenRescued = snapshot.queenRescued();
         finaleShown = snapshot.finaleShown();
+        introShown = snapshot.introShown();
         rng = snapshot.rng();
         secureRandom = snapshot.secureRandom();
         paused = false;
@@ -493,6 +510,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         if (!shopInitialized) {
             ensureShopDoor(room, worldPos);
+        }
+        if (!introShown) {
+            SwingUtilities.invokeLater(this::playPrologueIfNeeded);
         }
     }
 
@@ -655,15 +675,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             scaledArrowCache.clear();
         }
         weaponTextures.clear();
-        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true, false);
-        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true, false);
-        putWeaponTexture(WeaponType.BOW, "resources/Miscellanious/weapon_bow.png", true, false);
-        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true, false);
-        putWeaponTexture(WeaponType.CLAWS, "resources/Miscellanious/weapon_knife.png", true, false);
-        arrowTexture = orientWeapon(loadSpriteImage("resources/Miscellanious/weapon_arrow.png"), true, false);
+        putWeaponTexture(WeaponType.SWORD, "resources/Miscellanious/weapon_regular_sword.png", true, true, false);
+        putWeaponTexture(WeaponType.HAMMER, "resources/Miscellanious/weapon_hammer.png", true, true, false);
+        putWeaponTexture(WeaponType.BOW, "resources/Miscellanious/weapon_bow.png", true, false, false);
+        putWeaponTexture(WeaponType.STAFF, "resources/Miscellanious/weapon_green_magic_staff.png", true, false, false);
+        putWeaponTexture(WeaponType.CLAWS, "resources/Miscellanious/weapon_knife.png", true, false, false);
+        arrowTexture = orientWeapon(loadSpriteImage("resources/Miscellanious/weapon_arrow.png"), true, false, false);
     }
 
-    private void putWeaponTexture(WeaponType type, String resource, boolean rotateHorizontal, boolean flipVertical) {
+    private void putWeaponTexture(WeaponType type, String resource, boolean rotateHorizontal,
+                                  boolean flipHorizontal, boolean flipVertical) {
         if (type == null || resource == null) {
             return;
         }
@@ -671,7 +692,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (img == null) {
             return;
         }
-        BufferedImage prepared = orientWeapon(img, rotateHorizontal, flipVertical);
+        BufferedImage prepared = orientWeapon(img, rotateHorizontal, flipHorizontal, flipVertical);
         weaponTextures.put(type, prepared);
     }
 
@@ -690,7 +711,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private BufferedImage orientWeapon(BufferedImage img, boolean rotate, boolean flipVertical) {
+    private BufferedImage orientWeapon(BufferedImage img, boolean rotate, boolean flipHorizontal, boolean flipVertical) {
         if (img == null) {
             return null;
         }
@@ -713,6 +734,19 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 }
                 result = rotated;
             }
+        }
+        if (flipHorizontal && result != null) {
+            int w = result.getWidth();
+            int h = result.getHeight();
+            BufferedImage flipped = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = flipped.createGraphics();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                g.drawImage(result, w, 0, -w, h, null);
+            } finally {
+                g.dispose();
+            }
+            result = flipped;
         }
         if (flipVertical && result != null) {
             int w = result.getWidth();
@@ -1121,16 +1155,6 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             suppressNextMovementPress = true;
             suppressMovementDeadlineNanos = System.nanoTime() + 300_000_000L; // ~0.3s grace
         }
-        finaleShown = true;
-        pauseForOverlay(() -> {
-            CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
-                    CutsceneLibrary.queenRescued());
-            JOptionPane.showMessageDialog(DungeonRooms.this,
-                    "You saved the queen! Peace returns to the realm.",
-                    "Victory",
-                    JOptionPane.INFORMATION_MESSAGE);
-            exitHandler.run();
-        });
     }
 
     private void healPlayerTo(int targetHp) {
@@ -1143,6 +1167,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
+    private void playPrologueIfNeeded() {
+        if (introShown) {
+            return;
+        }
+        introShown = true;
+        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
+                CutsceneLibrary.prologue()));
+    }
+
     private void playGoldenKnightIntro() {
         if (goldenKnightIntroShown) {
             return;
@@ -1150,6 +1183,39 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         goldenKnightIntroShown = true;
         pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                 CutsceneLibrary.goldenKnightMonologue()));
+    }
+
+    private void playBossPrelude(BossEncounter encounter) {
+        if (encounter == null || encounter.kind == null) {
+            return;
+        }
+        if (encounter.kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
+            encounter.preludeShown = true;
+            if (!goldenKnightIntroShown) {
+                playGoldenKnightIntro();
+            }
+            return;
+        }
+        if (encounter.preludeShown) {
+            return;
+        }
+        CutsceneScript script = CutsceneLibrary.bossPrelude(encounter.kind, storyChapterFor(encounter.kind));
+        encounter.preludeShown = true;
+        if (script == null || script.slides().isEmpty()) {
+            return;
+        }
+        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this), script));
+    }
+
+    private void playBossEpilogue(BossBattlePanel.BossKind kind) {
+        if (kind == null || kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
+            return;
+        }
+        CutsceneScript script = CutsceneLibrary.bossEpilogue(kind, storyChapterFor(kind));
+        if (script == null || script.slides().isEmpty()) {
+            return;
+        }
+        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this), script));
     }
 
     private void handleGameWon() {
@@ -1702,6 +1768,40 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.attackAnimTicks = 20;
     }
 
+    private void triggerMeleeSwing(RoomEnemy enemy) {
+        if (enemy == null) {
+            return;
+        }
+        if (enemy.weapon != WeaponType.SWORD && enemy.weapon != WeaponType.HAMMER) {
+            return;
+        }
+        int duration = enemy.weapon == WeaponType.HAMMER ? 26 : 16;
+        enemy.attackAnimDuration = duration;
+        enemy.attackAnimTicks = duration;
+        enemy.weaponAngle = enemy.facingAngle;
+    }
+
+    private void startBowDraw(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
+    }
+
     private void applyPlayerDamage(double damage) {
         if (player == null || damage <= 0) {
             return;
@@ -2058,15 +2158,43 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void initializeBossPool() {
         bossPool.clear();
-        for (BossBattlePanel.BossKind kind : BossBattlePanel.BossKind.values()) {
-            if (BossBattlePanel.hasDedicatedAssets(kind)) {
+        for (BossBattlePanel.BossKind kind : STORY_BOSS_SEQUENCE) {
+            if (kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT || BossBattlePanel.hasDedicatedAssets(kind)) {
                 bossPool.add(kind);
             }
         }
         if (bossPool.isEmpty()) {
             Collections.addAll(bossPool, BossBattlePanel.BossKind.values());
         }
-        Collections.shuffle(bossPool, secureRandom);
+    }
+
+    private List<BossBattlePanel.BossKind> activeStoryOrder() {
+        List<BossBattlePanel.BossKind> order = new ArrayList<>();
+        for (BossBattlePanel.BossKind candidate : STORY_BOSS_SEQUENCE) {
+            if (candidate == BossBattlePanel.BossKind.GOLDEN_KNIGHT || BossBattlePanel.hasDedicatedAssets(candidate)) {
+                order.add(candidate);
+            }
+        }
+        if (bossEncounters != null) {
+            for (BossEncounter encounter : bossEncounters.values()) {
+                if (encounter != null && encounter.kind != null && !order.contains(encounter.kind)) {
+                    order.add(encounter.kind);
+                }
+            }
+        }
+        if (order.isEmpty()) {
+            Collections.addAll(order, BossBattlePanel.BossKind.values());
+        }
+        return order;
+    }
+
+    private int storyChapterFor(BossBattlePanel.BossKind kind) {
+        if (kind == null) {
+            return 0;
+        }
+        List<BossBattlePanel.BossKind> order = activeStoryOrder();
+        int idx = order.indexOf(kind);
+        return idx >= 0 ? idx : Math.max(0, kind.ordinal());
     }
 
     private Explosion makeExplosion(double x, double y) {
@@ -2122,9 +2250,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void triggerBossEncounter(BossEncounter encounter) {
         if (encounter == null) return;
-        if (encounter.kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
-            playGoldenKnightIntro();
-        }
+        playBossPrelude(encounter);
         inBoss = true;
         timer.stop();
         Consumer<Outcome> finish = outcome -> SwingUtilities.invokeLater(() -> {
@@ -2134,6 +2260,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 if (encounter.kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
                     queenRescued = true;
                     handleGameWon();
+                } else {
+                    playBossEpilogue(encounter.kind);
                 }
             } else {
                 showMessage(texts.text("boss_repelled"));
@@ -2581,6 +2709,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         Graphics2D overlay = (Graphics2D) g.create();
         try {
             worldGraphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            worldGraphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             overlay.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
             scaleX = getWidth() / (double) (COLS * TILE);
@@ -3828,6 +3957,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 shopRoom,
                 shopDoorFacing,
                 shopInitialized,
+                introShown,
                 goldenKnightIntroShown,
                 queenRescued,
                 finaleShown,

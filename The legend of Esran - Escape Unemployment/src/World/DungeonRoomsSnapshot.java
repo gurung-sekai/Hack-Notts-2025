@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -51,6 +51,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final Point shopRoom;
     private final DungeonRooms.Dir shopDoorFacing;
     private final boolean shopInitialized;
+    private final boolean introShown;
     private final boolean goldenKnightIntroShown;
     private final boolean queenRescued;
     private final boolean finaleShown;
@@ -86,6 +87,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          Point shopRoom,
                          DungeonRooms.Dir shopDoorFacing,
                          boolean shopInitialized,
+                         boolean introShown,
                          boolean goldenKnightIntroShown,
                          boolean queenRescued,
                          boolean finaleShown,
@@ -120,6 +122,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.shopRoom = shopRoom == null ? null : new Point(shopRoom);
         this.shopDoorFacing = shopDoorFacing;
         this.shopInitialized = shopInitialized;
+        this.introShown = introShown;
         this.goldenKnightIntroShown = goldenKnightIntroShown;
         this.queenRescued = queenRescued;
         this.finaleShown = finaleShown;
@@ -243,6 +246,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return shopInitialized;
     }
 
+    public boolean introShown() {
+        return introShown;
+    }
+
     public boolean goldenKnightIntroShown() {
         return goldenKnightIntroShown;
     }
@@ -313,6 +320,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
             copy.kind = original.kind;
             copy.defeated = original.defeated;
             copy.rewardClaimed = original.rewardClaimed;
+            copy.preludeShown = original.preludeShown;
             result.put(new Point(entry.getKey()), copy);
         }
         return result;

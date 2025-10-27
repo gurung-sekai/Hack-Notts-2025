@@ -21,6 +21,13 @@ import java.util.Map;
 public enum CutscenePortrait {
     HERO("resources/sprites/Knight/Idle/knight_m_idle_anim_f0.png", "/resources/Cutscene/Hero", 200),
     GOLDEN_KNIGHT("resources/bosses/goldenKnight/GN7.png", "/resources/Cutscene/GoldenKnight", 240),
+    GOLLUM(null, "/resources/bosses/Gollum", 240),
+    GRIM(null, "/resources/bosses/Grim", 240),
+    FIRE_FLINGER(null, "/resources/bosses/fireFlinger", 240),
+    GOLD_MECH(null, "/resources/bosses/goldMech", 240),
+    PURPLE_EMPRESS(null, "/resources/bosses/purpleEmpress", 240),
+    THE_WELCH(null, "/resources/bosses/theWelch", 240),
+    TOXIC_TREE(null, "/resources/bosses/toxicTree", 240),
     PRINCESS(null, "/resources/Princess", 220),
     SHOPKEEPER("resources/sprites/Wizard/wizzard_m_idle_anim_f0.png", "/resources/Shop", 200);
 

@@ -121,10 +121,7 @@ public final class ShopDialog extends JDialog {
 
             JButton leave = new JButton("Return to the dungeon");
             styleButton(leave, scaledFont(15f));
-            leave.addActionListener(e -> {
-                updateDialogue("Safe travels, hero.");
-                dispose();
-            });
+            leave.addActionListener(ShopDialog.this::closeShop);
             add(leave, BorderLayout.SOUTH);
 
             updateLabels();
