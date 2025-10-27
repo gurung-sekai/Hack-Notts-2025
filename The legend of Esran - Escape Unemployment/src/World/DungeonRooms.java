@@ -1121,6 +1121,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             suppressNextMovementPress = true;
             suppressMovementDeadlineNanos = System.nanoTime() + 300_000_000L; // ~0.3s grace
         }
+        finaleShown = true;
+        pauseForOverlay(() -> {
+            CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
+                    CutsceneLibrary.queenRescued());
+            JOptionPane.showMessageDialog(DungeonRooms.this,
+                    "You saved the queen! Peace returns to the realm.",
+                    "Victory",
+                    JOptionPane.INFORMATION_MESSAGE);
+            exitHandler.run();
+        });
     }
 
     private void healPlayerTo(int targetHp) {
@@ -1641,6 +1651,21 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
+        enemy.weapon = WeaponType.BOW;
+        enemy.weaponAngle = angle;
+        enemy.bowDrawTicks = Math.max(enemy.bowDrawTicks, 12);
+        enemy.attackAnimDuration = Math.max(enemy.attackAnimDuration, 12);
+        enemy.attackAnimTicks = Math.max(enemy.attackAnimTicks, 6);
+    }
+
+    private void triggerStaffCast(RoomEnemy enemy, double angle) {
+        if (enemy == null) {
+            return;
+        }
+        enemy.weapon = WeaponType.STAFF;
+        enemy.weaponAngle = angle;
+        enemy.attackAnimDuration = 20;
+        enemy.attackAnimTicks = 20;
     }
 
     private void triggerMeleeSwing(RoomEnemy enemy) {
@@ -2696,6 +2721,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 gg.drawOval(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
                 drawEnemyWeapon(gg, e);
             }
+            drawEnemyWeapon(gg, e);
         }
 
         if (playerIdleFrames != null && playerIdleFrames.length > 0){

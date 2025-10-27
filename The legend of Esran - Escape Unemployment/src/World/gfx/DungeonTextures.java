@@ -70,6 +70,9 @@ public final class DungeonTextures {
     private static final int DEFAULT_TILE_SIZE = 36;
     private static volatile int targetTileSize = DEFAULT_TILE_SIZE;
 
+    private static final int DEFAULT_TILE_SIZE = 36;
+    private static volatile int targetTileSize = DEFAULT_TILE_SIZE;
+
     private static final String[] FLOOR_SHEETS = {
             "resources/tiles/atlas_floor-16x16.png",
             "resources/tiles/Set 1.png",
