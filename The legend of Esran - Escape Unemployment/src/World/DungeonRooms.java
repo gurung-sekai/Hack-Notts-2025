@@ -1717,6 +1717,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
+        double angle = enemy.facingAngle;
+        if (player != null) {
+            double centerX = player.x + player.width / 2.0;
+            double centerY = player.y + player.height / 2.0;
+            double computed = Math.atan2(centerY - enemy.y, centerX - enemy.x);
+            if (Double.isFinite(computed)) {
+                angle = computed;
+            }
+        }
         enemy.weapon = WeaponType.STAFF;
         enemy.weaponAngle = angle;
         enemy.attackAnimDuration = 20;
