@@ -39,12 +39,16 @@ public final class DungeonTextures {
 
     private static final String[] FLOOR_SHEETS = {
             "resources/tiles/atlas_floor-16x16.png",
-            "resources/tiles/Set 1.png"
+            "resources/tiles/Set 1.png",
+            "Sprites/Dungeon Gathering Free Version/Set 1.png",
+            "AllSprites/Dungeon Gathering Free Version/Set 1.png"
     };
 
     private static final String[] WALL_SHEETS = {
             "resources/tiles/atlas_walls_low-16x16.png",
-            "resources/tiles/Set 3.5.png"
+            "resources/tiles/Set 3.5.png",
+            "Sprites/Background/atlas_walls_high-16x32.png",
+            "AllSprites/Dungeon Gathering Free Version/Set 3.5.png"
     };
 
     private final BufferedImage[] floorCells;
