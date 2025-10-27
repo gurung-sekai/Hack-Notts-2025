@@ -113,6 +113,16 @@ tasks.register('verifySpriteSheets', JavaExec) {
     mainClass = 'tools.SpriteSheetSlicerVerifier'
 }
 
+tasks.register('exportSpriteSlices', JavaExec) {
+    group = 'verification'
+    description = 'Exports sliced boss sprites to the build directory for manual review.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'tools.SpriteSheetSliceExporter'
+    doFirst {
+        setArgs([layout.buildDirectory.dir('slicerPreview').get().asFile.absolutePath])
+    }
+}
+
 tasks.named('check').configure {
     dependsOn 'verifySpriteSheets'
 }

@@ -1,0 +1,2 @@
+rootProject.name = 'sprite-sheet-ai-extractor'
+include('extractor')

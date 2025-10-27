@@ -20,6 +20,10 @@ Each dungeon is procedurally generated with randomized obstacles, enemy placemen
 
 > **Windows build note:** If you are working inside a OneDrive-synchronised folder, Gradle will automatically redirect its build output to `%LOCALAPPDATA%\HackNotts\legend-of-esran` to avoid the `Unable to delete directory … build/classes/java/main` error. You can override the location via the `legend.buildDir` Gradle property or the `GRADLE_BUILD_DIR` environment variable when needed.
 
+> **Sprite slicing preview:** Run `./gradlew exportSpriteSlices` to regenerate every boss frame under `build/slicerPreview/…` for quick visual inspection outside the game.
+
+> **SpriteSheet AI Extractor:** A dedicated Gradle project under `extractor/` can segment any supplied PNG sheets, preview the overlays, and export Unity/Godot metadata. Run `./gradlew :extractor:run --args="file=../The legend of Esran - Escape Unemployment/src/resources/bosses/attacks/theWelchAttack3.png outDir=./out visualize=true"` to process a single sheet with the JavaFX inspector.
+
 The player explores interconnected rooms, fights monsters, collects bows, keys, and arrows, and survives until facing the **final boss** — a large red monster that signifies the beginning of an upcoming turn-based battle system.
 
 

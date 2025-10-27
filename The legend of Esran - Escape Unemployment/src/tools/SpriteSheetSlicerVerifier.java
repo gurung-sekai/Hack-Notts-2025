@@ -41,7 +41,7 @@ public final class SpriteSheetSlicerVerifier {
         System.out.print(summary);
     }
 
-    private static List<Expectation> loadExpectations() throws IOException {
+    public static List<SheetSpec> listBossSheets() throws IOException {
         Path bossesDir = Paths.get("src", "resources", "bosses");
         if (!Files.isDirectory(bossesDir)) {
             throw new IOException("Boss resource directory not found: " + bossesDir.toAbsolutePath());
@@ -57,13 +57,23 @@ public final class SpriteSheetSlicerVerifier {
 
         sheets.sort(Comparator.comparing(path -> resourceRoot.relativize(path).toString().replace('\\', '/')));
 
-        List<Expectation> expectations = new ArrayList<>(sheets.size());
+        List<SheetSpec> specs = new ArrayList<>(sheets.size());
         for (Path sheet : sheets) {
             Path relative = resourceRoot.relativize(sheet);
-            String resourcePath = "/resources/" + relative.toString().replace('\\', '/');
+            String normalized = relative.toString().replace('\\', '/');
+            String resourcePath = "/resources/" + normalized;
             int[][] atlas = SpriteSheetSlicer.metadata(resourcePath);
-            Integer expected = atlas == null ? null : atlas.length;
-            expectations.add(new Expectation(resourcePath, expected));
+            specs.add(new SheetSpec(resourcePath, normalized, atlas));
+        }
+        return specs;
+    }
+
+    private static List<Expectation> loadExpectations() throws IOException {
+        List<SheetSpec> specs = listBossSheets();
+        List<Expectation> expectations = new ArrayList<>(specs.size());
+        for (SheetSpec spec : specs) {
+            Integer expected = spec.atlas() == null ? null : spec.atlas().length;
+            expectations.add(new Expectation(spec.resourcePath(), expected));
         }
         return expectations;
     }
@@ -134,6 +144,8 @@ public final class SpriteSheetSlicerVerifier {
         }
         return max;
     }
+
+    public record SheetSpec(String resourcePath, String relativePath, int[][] atlas) { }
 
     private record Expectation(String resourcePath, Integer expectedFrames) { }
 }
