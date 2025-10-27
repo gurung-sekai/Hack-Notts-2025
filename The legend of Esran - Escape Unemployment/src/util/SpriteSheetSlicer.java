@@ -51,6 +51,14 @@ public final class SpriteSheetSlicer {
 
     private SpriteSheetSlicer() { }
 
+    /**
+     * Return the configured atlas rectangles for the supplied resource path, or {@code null} if the sheet relies on
+     * automatic slicing.  Primarily intended for verification tooling.
+     */
+    public static int[][] metadata(String resourcePath) {
+        return SpriteSheetMetadata.lookup(resourcePath);
+    }
+
     /** Slice a sprite sheet referenced by a resource path. */
     public static BufferedImage[] slice(String resourcePath, Options options) throws IOException {
         Options opts = options == null ? Options.DEFAULT : options;
