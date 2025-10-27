@@ -1,6 +1,6 @@
 package World.cutscene;
 
-import World.ui.UndertaleText;
+import World.UndertaleText;
 import gfx.HiDpiScaler;
 
 import javax.swing.*;
