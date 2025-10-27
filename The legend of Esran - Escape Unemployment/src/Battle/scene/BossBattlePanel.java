@@ -98,6 +98,9 @@ public class BossBattlePanel extends JPanel {
         this.floorTile = loadImage("/resources/tiles/floor/floor_5.png");
 
         addMessage("A wild " + bossDef.displayName() + " appears!");
+        heroVisual.ensureWarmed(1.0);
+        bossVisual.ensureWarmed(1.0);
+        SwingUtilities.invokeLater(this::warmForCurrentLayout);
 
         addKeyListener(new KeyAdapter() {
             @Override public void keyPressed(KeyEvent e) {
@@ -130,6 +133,7 @@ public class BossBattlePanel extends JPanel {
         if (!animationTimer.isRunning()) {
             animationTimer.start();
         }
+        SwingUtilities.invokeLater(this::warmForCurrentLayout);
     }
 
     @Override public void removeNotify() {
@@ -344,6 +348,12 @@ public class BossBattlePanel extends JPanel {
         double offsetX = (getWidth() - BASE_WIDTH * scale) / 2.0;
         double offsetY = (getHeight() - BASE_HEIGHT * scale) / 2.0;
         return new LayoutMetrics(scale, offsetX, offsetY);
+    }
+
+    private void warmForCurrentLayout() {
+        LayoutMetrics metrics = layoutMetrics();
+        heroVisual.ensureWarmed(metrics.scale());
+        bossVisual.ensureWarmed(metrics.scale());
     }
 
     private record LayoutMetrics(double scale, double offsetX, double offsetY) { }
@@ -648,6 +658,7 @@ public class BossBattlePanel extends JPanel {
         private FrameAnim activeAttack = null;
         private double attackTimer = 0.0;
         private double warmedScale = Double.NaN;
+        private double warmedAttacksScale = Double.NaN;
 
         FighterVisual(Fighter fighter, SpriteSource spriteSource, double footX, double footY,
                       double baseScale, double maxHeight, List<String> attackIds) {
@@ -753,8 +764,28 @@ public class BossBattlePanel extends JPanel {
                 return;
             }
             sprite.forEachFrame(frame -> warmFrame(frame, layoutScale));
+            warmAttackFrames(layoutScale);
+            if (activeAttack != null) {
+                activeAttack.forEachFrame(frame -> warmFrame(frame, layoutScale));
+            }
+            warmedScale = layoutScale;
+        }
+
+        private void warmAttackFrames(double layoutScale) {
+            if (attackIds.isEmpty()) {
+                warmedAttacksScale = layoutScale;
+                return;
+            }
+            if (Double.isFinite(warmedAttacksScale) && Math.abs(warmedAttacksScale - layoutScale) < 1e-3) {
+                return;
+            }
             for (String attackId : attackIds) {
-                BufferedImage[] frames = BossFXLibrary.attackFrames(attackId);
+                BufferedImage[] frames;
+                try {
+                    frames = BossFXLibrary.attackFrames(attackId);
+                } catch (RuntimeException ex) {
+                    continue;
+                }
                 if (frames == null) {
                     continue;
                 }
@@ -762,10 +793,7 @@ public class BossBattlePanel extends JPanel {
                     warmFrame(frame, layoutScale);
                 }
             }
-            if (activeAttack != null) {
-                activeAttack.forEachFrame(frame -> warmFrame(frame, layoutScale));
-            }
-            warmedScale = layoutScale;
+            warmedAttacksScale = layoutScale;
         }
 
         private void warmFrame(BufferedImage frame, double layoutScale) {
@@ -796,6 +824,63 @@ public class BossBattlePanel extends JPanel {
                 throw new IllegalStateException("Missing boss sprite frames for: " + resourceDirectory);
             }
         };
+    }
+
+    private static final double FALLBACK_UPSCALE_FACTOR = 2.0;
+
+    private static SpriteChoice hiResBossSprite(String directoryKey, String fallbackPrefix) {
+        String dir = "/resources/bosses/" + directoryKey;
+        if (!ResourceLoader.listPng(dir).isEmpty()) {
+            return new SpriteChoice(directorySource(dir), 1.0);
+        }
+
+        BufferedImage[] fallbackFrames = AnimatedSprite.loadFramesFromPrefix(fallbackPrefix);
+        if (fallbackFrames.length == 0) {
+            throw new IllegalStateException("Missing fallback boss sprite frames for: " + fallbackPrefix);
+        }
+
+        BufferedImage[] upscaled = upscaleFrames(fallbackFrames, FALLBACK_UPSCALE_FACTOR);
+        SpriteSource source = sprite -> sprite.add(AnimatedSprite.State.IDLE, upscaled);
+        return new SpriteChoice(source, FALLBACK_UPSCALE_FACTOR);
+    }
+
+    private static BufferedImage[] upscaleFrames(BufferedImage[] frames, double factor) {
+        if (frames == null || frames.length == 0 || !Double.isFinite(factor) || factor <= 1.0) {
+            return frames == null ? null : frames.clone();
+        }
+
+        BufferedImage[] scaled = new BufferedImage[frames.length];
+        for (int i = 0; i < frames.length; i++) {
+            BufferedImage frame = frames[i];
+            if (frame == null) {
+                continue;
+            }
+            int targetWidth = Math.max(1, (int) Math.round(frame.getWidth() * factor));
+            int targetHeight = Math.max(1, (int) Math.round(frame.getHeight() * factor));
+            scaled[i] = HiDpiScaler.scale(frame, targetWidth, targetHeight);
+        }
+        return AnimatedSprite.normaliseFrames(scaled);
+    }
+
+    private static BossDefinition hiResBossDefinition(String displayName, Affinity affinity, Stats stats,
+                                                      String directoryKey, String fallbackPrefix,
+                                                      double baseScale, double maxHeight,
+                                                      double offenseMod, double defenseMod, int momentumEdge,
+                                                      List<String> attackIds) {
+        SpriteChoice choice = hiResBossSprite(directoryKey, fallbackPrefix);
+        double compensation = choice.scaleCompensation();
+        if (!Double.isFinite(compensation) || compensation <= 0.0) {
+            compensation = 1.0;
+        }
+        double effectiveScale = baseScale / compensation;
+        return new BossDefinition(displayName, affinity, stats, choice.source(), effectiveScale,
+                maxHeight, offenseMod, defenseMod, momentumEdge, attackIds);
+    }
+
+    private record SpriteChoice(SpriteSource source, double scaleCompensation) {
+        private SpriteChoice {
+            Objects.requireNonNull(source, "source");
+        }
     }
 
     private static List<String> bossAttackIds(String attackKey) {
@@ -950,23 +1035,23 @@ public class BossBattlePanel extends JPanel {
 
         static BossDefinition of(BossKind kind) {
             return switch (kind) {
-                case OGRE_WARLORD -> new BossDefinition("Ogre Warlord", Affinity.STONE,
-                        new Stats(230, 21, 15, 11), prefixSource("/resources/sprites/Ogre/ogre_idle_anim_f"), 3.5,
+                case OGRE_WARLORD -> hiResBossDefinition("Ogre Warlord", Affinity.STONE,
+                        new Stats(230, 21, 15, 11), "ogreWarlord", "/resources/sprites/Ogre/ogre_idle_anim_f", 0.88,
                         Double.NaN, 0.96, 1.02, 1, List.of());
-                case SKELETON_LORD -> new BossDefinition("Skeleton Lord", Affinity.VERDANT,
-                        new Stats(195, 18, 12, 22), prefixSource("/resources/sprites/Skeleton/skelet_idle_anim_f"), 3.3,
+                case SKELETON_LORD -> hiResBossDefinition("Skeleton Lord", Affinity.VERDANT,
+                        new Stats(195, 18, 12, 22), "skeletonLord", "/resources/sprites/Skeleton/skelet_idle_anim_f", 0.85,
                         Double.NaN, 0.92, 0.94, 0, List.of());
-                case PUMPKIN_KING -> new BossDefinition("Pumpkin King", Affinity.EMBER,
-                        new Stats(210, 19, 17, 15), prefixSource("/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f"), 3.4,
+                case PUMPKIN_KING -> hiResBossDefinition("Pumpkin King", Affinity.EMBER,
+                        new Stats(210, 19, 17, 15), "pumpkinKing", "/resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f", 0.86,
                         Double.NaN, 0.94, 1.02, 0, List.of());
-                case IMP_OVERLORD -> new BossDefinition("Imp Overlord", Affinity.STORM,
-                        new Stats(185, 20, 11, 24), prefixSource("/resources/sprites/Imp/imp_idle_anim_f"), 3.6,
+                case IMP_OVERLORD -> hiResBossDefinition("Imp Overlord", Affinity.STORM,
+                        new Stats(185, 20, 11, 24), "impOverlord", "/resources/sprites/Imp/imp_idle_anim_f", 0.92,
                         Double.NaN, 0.98, 0.9, 0, List.of());
-                case WIZARD_ARCHON -> new BossDefinition("Wizard Archon", Affinity.STORM,
-                        new Stats(200, 22, 12, 19), prefixSource("/resources/sprites/Wizard/wizzard_m_idle_anim_f"), 3.6,
+                case WIZARD_ARCHON -> hiResBossDefinition("Wizard Archon", Affinity.STORM,
+                        new Stats(200, 22, 12, 19), "wizardArchon", "/resources/sprites/Wizard/wizzard_m_idle_anim_f", 0.92,
                         Double.NaN, 0.99, 0.92, 1, List.of());
-                case BIG_ZOMBIE -> new BossDefinition("Dread Husk", Affinity.STONE,
-                        new Stats(265, 17, 21, 9), prefixSource("/resources/sprites/Bigzombie/big_zombie_idle_anim_f"), 3.8,
+                case BIG_ZOMBIE -> hiResBossDefinition("Dread Husk", Affinity.STONE,
+                        new Stats(265, 17, 21, 9), "dreadHusk", "/resources/sprites/Bigzombie/big_zombie_idle_anim_f", 0.95,
                         Double.NaN, 0.88, 1.12, -1, List.of());
                 case GOLLUM -> new BossDefinition("Gollum", Affinity.STORM,
                         new Stats(205, 23, 13, 27), directorySource("/resources/bosses/Gollum"), 1.6,
