@@ -1,5 +1,6 @@
 package World.gfx;
 
+import gfx.HiDpiScaler;
 import util.ResourceLoader;
 
 import javax.imageio.ImageIO;
@@ -33,14 +34,21 @@ public final class DungeonTextures {
     private static final String FLOOR_DIR = "resources/tiles/floor";
     private static final String WALL_DIR = "resources/tiles/wall";
 
+    private static final int DEFAULT_TILE_SIZE = 36;
+    private static volatile int targetTileSize = DEFAULT_TILE_SIZE;
+
     private static final String[] FLOOR_SHEETS = {
             "resources/tiles/atlas_floor-16x16.png",
-            "resources/tiles/Set 1.png"
+            "resources/tiles/Set 1.png",
+            "Sprites/Dungeon Gathering Free Version/Set 1.png",
+            "AllSprites/Dungeon Gathering Free Version/Set 1.png"
     };
 
     private static final String[] WALL_SHEETS = {
             "resources/tiles/atlas_walls_low-16x16.png",
-            "resources/tiles/Set 3.5.png"
+            "resources/tiles/Set 3.5.png",
+            "Sprites/Background/atlas_walls_high-16x32.png",
+            "AllSprites/Dungeon Gathering Free Version/Set 3.5.png"
     };
 
     private final BufferedImage[] floorCells;
@@ -58,6 +66,11 @@ public final class DungeonTextures {
      * cannot be located. The method never returns {@code null}.
      */
     public static DungeonTextures load() {
+        return load(DEFAULT_TILE_SIZE);
+    }
+
+    public static DungeonTextures load(int tileSize) {
+        targetTileSize = Math.max(1, tileSize);
         DungeonTextures fromAssets = tryLoadAssets();
         return fromAssets != null ? fromAssets : procedural();
     }
@@ -69,12 +82,12 @@ public final class DungeonTextures {
         BufferedImage[] floors = new BufferedImage[4];
         BufferedImage[] walls = new BufferedImage[3];
         for (int i = 0; i < floors.length; i++) {
-            floors[i] = makeTile(new Color(18 + i * 4, 64 + i * 3, 78 + i * 4), new Color(12, 42, 56));
+            floors[i] = upscaleTile(makeTile(new Color(18 + i * 4, 64 + i * 3, 78 + i * 4), new Color(12, 42, 56)));
         }
         for (int i = 0; i < walls.length; i++) {
-            walls[i] = makeTile(new Color(46 + i * 6, 126 + i * 5, 146 + i * 4), new Color(28, 82, 96));
+            walls[i] = upscaleTile(makeTile(new Color(46 + i * 6, 126 + i * 5, 146 + i * 4), new Color(28, 82, 96)));
         }
-        BufferedImage door = makeTile(new Color(38, 80, 92), new Color(24, 60, 70));
+        BufferedImage door = upscaleTile(makeTile(new Color(38, 80, 92), new Color(24, 60, 70)));
         Graphics2D g = door.createGraphics();
         try {
             g.setColor(new Color(210, 178, 90));
@@ -123,16 +136,16 @@ public final class DungeonTextures {
             BufferedImage door = loadImageIfExists(FLOOR_DIR + "/door_floor.png");
 
             if (folderFloors.length > 0 && folderWalls.length > 0) {
-                return new DungeonTextures(folderFloors, folderWalls, door);
+                return new DungeonTextures(folderFloors, folderWalls, upscaleTile(door));
             }
 
             BufferedImage floorSheet = loadFirstExistingImage(FLOOR_SHEETS);
             BufferedImage wallSheet = loadFirstExistingImage(WALL_SHEETS);
             if (floorSheet != null && wallSheet != null) {
-                BufferedImage[] sheetFloors = sliceSheet(floorSheet, 16);
-                BufferedImage[] sheetWalls = sliceSheet(wallSheet, 16);
+                BufferedImage[] sheetFloors = upscaleTiles(sliceSheet(floorSheet, 16));
+                BufferedImage[] sheetWalls = upscaleTiles(sliceSheet(wallSheet, 16));
                 if (sheetFloors.length > 0 && sheetWalls.length > 0) {
-                    return new DungeonTextures(sheetFloors, sheetWalls, door);
+                    return new DungeonTextures(sheetFloors, sheetWalls, upscaleTile(door));
                 }
             }
         } catch (IOException ex) {
@@ -158,7 +171,7 @@ public final class DungeonTextures {
             try (InputStream in = Files.newInputStream(path)) {
                 BufferedImage img = ImageIO.read(in);
                 if (img != null) {
-                    images.add(img);
+                    images.add(upscaleTile(img));
                 }
             }
         }
@@ -197,6 +210,25 @@ public final class DungeonTextures {
             }
         }
         return null;
+    }
+
+    private static BufferedImage[] upscaleTiles(BufferedImage[] source) {
+        if (source == null) {
+            return new BufferedImage[0];
+        }
+        BufferedImage[] scaled = new BufferedImage[source.length];
+        for (int i = 0; i < source.length; i++) {
+            scaled[i] = upscaleTile(source[i]);
+        }
+        return scaled;
+    }
+
+    private static BufferedImage upscaleTile(BufferedImage img) {
+        if (img == null) {
+            return null;
+        }
+        int target = Math.max(1, targetTileSize);
+        return HiDpiScaler.scale(img, target, target);
     }
 
     private static List<Path> locateDirectories(String relativePath) {
