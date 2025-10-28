@@ -39,6 +39,11 @@ public final class SettingsPersistence {
         props.setProperty("resolution.height", Integer.toString(resolution.height));
         props.setProperty("refreshRate", Integer.toString(settings.refreshRate()));
         props.setProperty("language", settings.language().toLanguageTag());
+        props.setProperty("fullscreen", Boolean.toString(settings.fullscreen()));
+        props.setProperty("musicVolume", Float.toString(settings.musicVolume()));
+        props.setProperty("sfxVolume", Float.toString(settings.sfxVolume()));
+        props.setProperty("musicEnabled", Boolean.toString(settings.musicEnabled()));
+        props.setProperty("cutscenesEnabled", Boolean.toString(settings.cutscenesEnabled()));
         for (var entry : settings.controls().view().entrySet()) {
             props.setProperty("control." + entry.getKey().name(), Integer.toString(entry.getValue()));
         }
@@ -61,8 +66,14 @@ public final class SettingsPersistence {
             Dimension resolution = parseResolution(props);
             int refresh = parseRefreshRate(props);
             Locale language = parseLocale(props);
+            boolean fullscreen = Boolean.parseBoolean(props.getProperty("fullscreen", "true"));
+            float musicVolume = parseFloat(props, "musicVolume", 0.7f);
+            float sfxVolume = parseFloat(props, "sfxVolume", 0.8f);
+            boolean musicEnabled = Boolean.parseBoolean(props.getProperty("musicEnabled", "true"));
+            boolean cutscenesEnabled = Boolean.parseBoolean(props.getProperty("cutscenesEnabled", "true"));
             ControlsProfile profile = parseControls(props);
-            return Optional.of(new GameSettings(resolution, refresh, language, profile));
+            return Optional.of(new GameSettings(resolution, refresh, language, profile,
+                    fullscreen, musicVolume, sfxVolume, musicEnabled, cutscenesEnabled));
         } catch (RuntimeException ex) {
             return Optional.empty();
         }
@@ -117,6 +128,18 @@ public final class SettingsPersistence {
             return defaultValue;
         }
         return Integer.parseInt(text.trim());
+    }
+
+    private static float parseFloat(Properties props, String key, float defaultValue) {
+        String text = props.getProperty(key);
+        if (text == null || text.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Float.parseFloat(text.trim());
+        } catch (NumberFormatException ex) {
+            return defaultValue;
+        }
     }
 
     private static int clamp(int value, int min, int max) {

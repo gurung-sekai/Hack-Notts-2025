@@ -3,107 +3,147 @@ import Battle.domain.*;
 import Battle.util.Rng;
 
 public class SimpleAi {
+    private static volatile boolean strategicMode = true;
+
+    public static void setStrategicMode(boolean enabled) {
+        strategicMode = enabled;
+    }
+
     public static Technique choose(Fighter me, Fighter opp, int momentum) {
-        if (Rng.d01() < 0.12) {
-            Technique[] opts = BaseMoves.MOVES;
-            Technique pick;
-            int guardrails = 0;
-            do {
-                pick = opts[Rng.nextInt(opts.length)];
-                guardrails++;
-            } while ((me.cd.getOrDefault(pick, 0) > 0 || (me.status == Status.ROOTED && pick.tag == Tag.CHARGE)) && guardrails < 8);
-            if (me.cd.getOrDefault(pick, 0) <= 0 && !(me.status == Status.ROOTED && pick.tag == Tag.CHARGE)) {
-                return pick;
-            }
+        Technique random = pickRandomUsable(me);
+        if (!strategicMode) {
+            return random != null ? random : BaseMoves.MOVES[0];
         }
 
-        Technique best = BaseMoves.MOVES[0];
+        if (random != null && Rng.d01() < 0.12) {
+            return random;
+        }
+
+        Technique best = random;
         double bestScore = Double.NEGATIVE_INFINITY;
+
+        Technique[] moves = BaseMoves.MOVES;
         Technique lastUsed = me.lastUsed;
         double myHpRatio = me.hp / (double) Math.max(1, me.base.hp);
         double oppHpRatio = opp.hp / (double) Math.max(1, opp.base.hp);
+        boolean oppCharging = opp.charging != null;
+        Status oppStatus = opp.status;
+        Status myStatus = me.status;
 
-        for (Technique t : BaseMoves.MOVES) {
-            int cooldown = me.cd.getOrDefault(t, 0);
-            if (cooldown > 0) continue;
-            if (me.status == Status.ROOTED && t.tag == Tag.CHARGE) continue;
+        double guardHpBonus = myHpRatio < 0.45 ? 18.0 : (myHpRatio > 0.85 ? -10.0 : 0.0);
+        double guardMomentumBonus = momentum < -1 ? 12.0 : 0.0; // combines original +7 and +5 bonuses
+        boolean oppRooted = oppStatus == Status.ROOTED;
+        boolean oppIgnited = oppStatus == Status.IGNITED;
+        boolean oppShocked = oppStatus == Status.SHOCKED;
 
-            double aff = AffinityChart.mult(t.affinity, opp.aura);
-            // Heuristic: value power by affinity, prefer higher priority,
-            // like momentum-shifting moves a bit, guard has utility value,
-            // and interrupts are great if opponent is charging.
-            double score = (t.power * aff)
-                    + (t.priority * 4.5)
-                    + (t.momentumDelta * 7)
-                    + (t.tag == Tag.GUARD ? 9 : 0)
-                    + ((opp.charging != null && t.tag == Tag.INTERRUPT) ? 40 : 0);
-
-            double hpRatio = me.hp / (double) Math.max(1, me.base.hp);
-            if (t.tag == Tag.GUARD) {
-                if (hpRatio < 0.45) score += 18;
-                else if (hpRatio > 0.85) score -= 10;
-                if (momentum < -1) score += 7;
-            }
-            if (opp.status == Status.IGNITED && t == BaseMoves.FLAME_LASH) {
-                score -= 6;
-            }
-            if (opp.status == Status.ROOTED && t == BaseMoves.THORN_BIND) {
-                score -= 5;
-            }
-            if (momentum < -1 && t.tag == Tag.GUARD) {
-                score += 5;
+        for (Technique move : moves) {
+            if (!isUsable(me, myStatus, move)) {
+                continue;
             }
 
-            if (t == BaseMoves.FLAME_LASH) {
-                if (opp.status == Status.ROOTED) {
-                    score += 6;
+            double affinity = AffinityChart.mult(move.affinity, opp.aura);
+            double score = 0.0;
+            score += move.power * affinity;
+            score += move.priority * 4.5;
+            score += move.momentumDelta * 7.0;
+            if (move.tag == Tag.GUARD) {
+                score += 9.0 + guardHpBonus + guardMomentumBonus;
+            }
+            if (oppCharging && move.tag == Tag.INTERRUPT) {
+                score += 40.0;
+            }
+
+            if (move == BaseMoves.FLAME_LASH) {
+                if (oppRooted) {
+                    score += 6.0;
                 }
-                if (opp.status == Status.IGNITED) {
-                    score += 8;
+                if (oppIgnited) {
+                    score += 8.0;
                 }
                 if (oppHpRatio < 0.35) {
-                    score += 4;
+                    score += 4.0;
+                }
+                if (oppStatus == Status.IGNITED) {
+                    score -= 6.0; // penalty for redundant ignite
                 }
             }
-            if (t == BaseMoves.THORN_BIND) {
-                if (opp.status != Status.ROOTED) {
-                    score += (momentum >= 0 ? 10 : 6);
+
+            if (move == BaseMoves.THORN_BIND) {
+                if (!oppRooted) {
+                    score += (momentum >= 0 ? 10.0 : 6.0);
+                } else {
+                    score -= 5.0;
                 }
-                if (opp.charging != null) {
-                    score += 9;
+                if (oppCharging) {
+                    score += 9.0;
                 }
             }
-            if (t == BaseMoves.DISRUPT_BOLT) {
-                if (opp.status != Status.SHOCKED) {
-                    score += 5;
+
+            if (move == BaseMoves.DISRUPT_BOLT) {
+                if (!oppShocked) {
+                    score += 5.0;
                 }
                 if (momentum > 1) {
-                    score += 3;
+                    score += 3.0;
                 }
                 if (oppHpRatio > myHpRatio + 0.2) {
-                    score += 4;
+                    score += 4.0;
                 }
             }
 
-            if (lastUsed == t) {
+            if (lastUsed == move) {
                 score -= 6.5;
             }
-            if (lastUsed == BaseMoves.THORN_BIND && t == BaseMoves.FLAME_LASH && opp.status == Status.ROOTED) {
-                score += 10;
+            if (lastUsed == BaseMoves.THORN_BIND && move == BaseMoves.FLAME_LASH && oppRooted) {
+                score += 10.0;
             }
-            if (lastUsed == BaseMoves.FLAME_LASH && t == BaseMoves.BRACE && myHpRatio < 0.5) {
-                score += 6;
+            if (lastUsed == BaseMoves.FLAME_LASH && move == BaseMoves.BRACE && myHpRatio < 0.5) {
+                score += 6.0;
             }
 
-            // Inject a small amount of variance so the boss occasionally
-            // makes suboptimal choices and fights feel less deterministic.
+            // Inject a small amount of variance so the boss occasionally makes
+            // suboptimal choices and fights feel less deterministic.
             score += (Rng.d01() - 0.5) * 12.0;
 
             if (score > bestScore) {
                 bestScore = score;
-                best = t;
+                best = move;
             }
         }
-        return best;
+
+        return best != null ? best : BaseMoves.MOVES[0];
+    }
+
+    private static Technique pickRandomUsable(Fighter me) {
+        Technique[] moves = BaseMoves.MOVES;
+        Technique fallback = null;
+        for (int attempts = 0; attempts < 8; attempts++) {
+            Technique candidate = moves[Rng.nextInt(moves.length)];
+            if (isUsable(me, me.status, candidate)) {
+                return candidate;
+            }
+            if (fallback == null && me.cd.getOrDefault(candidate, 0) == 0) {
+                fallback = candidate;
+            }
+        }
+        if (fallback != null && isUsable(me, me.status, fallback)) {
+            return fallback;
+        }
+        for (Technique move : moves) {
+            if (isUsable(me, me.status, move)) {
+                return move;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isUsable(Fighter me, Status status, Technique move) {
+        if (move == null) {
+            return false;
+        }
+        if (me.cd.getOrDefault(move, 0) > 0) {
+            return false;
+        }
+        return !(status == Status.ROOTED && move.tag == Tag.CHARGE);
     }
 }
