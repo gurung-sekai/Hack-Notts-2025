@@ -100,6 +100,7 @@ public class BossBattlePanel extends JPanel {
     private int floorCacheWidth = -1;
     private int floorCacheHeight = -1;
     private final Timer animationTimer;
+    private boolean lowFidelityMode = false;
 
     private long lastTickNs = 0;
     private double resolveLock = 0.0;
@@ -141,7 +142,7 @@ public class BossBattlePanel extends JPanel {
             }
         });
 
-        animationTimer = new Timer(1000 / 60, e -> tick());
+        animationTimer = new Timer(33, e -> tick());
         animationTimer.setInitialDelay(0);
         animationTimer.setCoalesce(true);
         animationTimer.start();
@@ -150,6 +151,18 @@ public class BossBattlePanel extends JPanel {
     /** Stop the animation timer so the panel can be disposed without background work. */
     public void shutdown() {
         animationTimer.stop();
+    }
+
+    /** Enable or disable a simplified render path for profiling. */
+    public void setLowFidelityMode(boolean enabled) {
+        if (this.lowFidelityMode != enabled) {
+            this.lowFidelityMode = enabled;
+            repaint();
+        }
+    }
+
+    public boolean isLowFidelityMode() {
+        return lowFidelityMode;
     }
 
     @Override public void addNotify() {
@@ -347,20 +360,28 @@ public class BossBattlePanel extends JPanel {
     @Override protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
 
         LayoutMetrics metrics = layoutMetrics();
-        heroVisual.ensureWarmed(metrics.scale());
-        bossVisual.ensureWarmed(metrics.scale());
+        if (heroVisual.needsWarm(metrics.scale())) {
+            heroVisual.ensureWarmed(metrics.scale());
+        }
+        if (bossVisual.needsWarm(metrics.scale())) {
+            bossVisual.ensureWarmed(metrics.scale());
+        }
 
         drawFloor(g2);
-        drawEffectsBehind(g2);
+        if (!lowFidelityMode) {
+            drawEffectsBehind(g2);
+        }
         drawFighter(g2, heroVisual, false, metrics);
         drawFighter(g2, bossVisual, true, metrics);
-        drawEffectsFront(g2);
-        drawFloatingTexts(g2, metrics);
+        if (!lowFidelityMode) {
+            drawEffectsFront(g2);
+            drawFloatingTexts(g2, metrics);
+        }
         drawHud(g2, metrics);
     }
 
@@ -376,8 +397,12 @@ public class BossBattlePanel extends JPanel {
 
     private void warmForCurrentLayout() {
         LayoutMetrics metrics = layoutMetrics();
-        heroVisual.ensureWarmed(metrics.scale());
-        bossVisual.ensureWarmed(metrics.scale());
+        if (heroVisual.needsWarm(metrics.scale())) {
+            heroVisual.ensureWarmed(metrics.scale());
+        }
+        if (bossVisual.needsWarm(metrics.scale())) {
+            bossVisual.ensureWarmed(metrics.scale());
+        }
     }
 
     private record LayoutMetrics(double scale, double offsetX, double offsetY) { }
@@ -810,6 +835,13 @@ public class BossBattlePanel extends JPanel {
 
         double maxWidthPx(double layoutScale) {
             return maxWidthBase > 0 ? maxWidthBase * layoutScale : Double.POSITIVE_INFINITY;
+        }
+
+        boolean needsWarm(double layoutScale) {
+            if (!Double.isFinite(layoutScale) || layoutScale <= 0) {
+                return false;
+            }
+            return !Double.isFinite(warmedScale) || Math.abs(warmedScale - layoutScale) >= 1e-3;
         }
 
         void ensureWarmed(double layoutScale) {

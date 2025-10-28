@@ -10,6 +10,10 @@ public class BattleSwingController {
     private int momentum = 0;
     private boolean over = false;
 
+    private static int clampMomentum(int value) {
+        return Math.max(-3, Math.min(3, value));
+    }
+
     public BattleSwingController(Fighter a, Fighter b){ this.a=a; this.b=b; }
     public boolean isOver(){ return over; }
     public int getMomentum(){ return momentum; }
@@ -56,7 +60,7 @@ public class BattleSwingController {
         if (u.status == Status.ROOTED && tech.tag == Tag.CHARGE) { s.append(u.name).append(" is rooted and cannot charge!\n"); return s.toString(); }
         if (!Rng.roll(tech.accuracy)) { s.append("It misses!\n"); setCooldown(u, tech); return s.toString(); }
         if (tech.tag == Tag.CHARGE) { u.charging = tech; s.append(u.name).append(" gathers power...\n"); setCooldown(u, tech); return s.toString(); }
-        if (tech.tag == Tag.INTERRUPT && t.charging != null) { s.append("Interrupt! ").append(t.name).append("'s charge is canceled.\n"); t.charging=null; momentum += (u==a?1:-1); }
+        if (tech.tag == Tag.INTERRUPT && t.charging != null) { s.append("Interrupt! ").append(t.name).append("'s charge is canceled.\n"); t.charging=null; momentum = clampMomentum(momentum + (u==a?1:-1)); }
 
         if (tech.isUtility()) {
             if (tech.onHit != null) tech.onHit.accept(u,t);
@@ -68,8 +72,7 @@ public class BattleSwingController {
             if (res.crit) s.append("Critical strike!\n");
             if (res.mult > 1.0) s.append("It resonates strongly!\n");
             else if (res.mult < 1.0) s.append("Resisted.\n");
-            momentum += (u==a? tech.momentumDelta : -tech.momentumDelta);
-            momentum = Math.max(-3, Math.min(3, momentum));
+            momentum = clampMomentum(momentum + (u==a? tech.momentumDelta : -tech.momentumDelta));
             if (tech.onHit != null) tech.onHit.accept(u,t);
         }
         setCooldown(u, tech);
