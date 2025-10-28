@@ -1,6 +1,7 @@
 package World.cutscene;
 
 import java.util.List;
+import java.util.Locale;
 
 import Battle.scene.BossBattlePanel.BossKind;
 
@@ -237,6 +238,20 @@ public final class CutsceneLibrary {
         };
     }
 
+    public static CutsceneScript defaultBossVictory(BossKind kind) {
+        String name = displayName(kind);
+        return new CutsceneScript(List.of(
+                new CutsceneSlide("Hero",
+                        "The " + name + " is defeated. One more path opens toward Queen Aurelia.",
+                        CutscenePortrait.HERO,
+                        CutsceneBackgrounds.heroResolve()),
+                new CutsceneSlide("Princess",
+                        "I can feel the chains loosen, hero. Please, hurry!",
+                        CutscenePortrait.PRINCESS,
+                        CutsceneBackgrounds.dungeonCaptivity())
+        ));
+    }
+
     public static CutsceneScript queenRescued() {
         return new CutsceneScript(List.of(
                 new CutsceneSlide("Princess",
@@ -256,6 +271,25 @@ public final class CutsceneLibrary {
 
     private static String chapterTitle(int chapterIndex) {
         return "Chapter " + Math.max(1, chapterIndex + 1);
+    }
+
+    private static String displayName(BossKind kind) {
+        if (kind == null) {
+            return "guardian";
+        }
+        String raw = kind.name().toLowerCase(Locale.ENGLISH).replace('_', ' ');
+        StringBuilder sb = new StringBuilder(raw.length());
+        boolean capitalise = true;
+        for (char c : raw.toCharArray()) {
+            if (capitalise && Character.isLetter(c)) {
+                sb.append(Character.toUpperCase(c));
+                capitalise = false;
+            } else {
+                sb.append(c);
+                capitalise = (c == ' ');
+            }
+        }
+        return sb.toString();
     }
 
     private static AnimatedBackdrop bossBackdrop(BossKind kind) {

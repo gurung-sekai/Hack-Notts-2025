@@ -72,8 +72,9 @@ public final class HiDpiScaler {
             BufferedImage tmp = new BufferedImage(Math.max(1, nextWidth), Math.max(1, nextHeight), BufferedImage.TYPE_INT_ARGB);
             Graphics2D g2 = tmp.createGraphics();
             try {
-                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+                g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
                 g2.drawImage(current, 0, 0, nextWidth, nextHeight, null);
             } finally {
                 g2.dispose();
