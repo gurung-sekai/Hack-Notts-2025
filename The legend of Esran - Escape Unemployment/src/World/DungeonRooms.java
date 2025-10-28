@@ -7,6 +7,7 @@ import World.cutscene.CutsceneDialog;
 import World.cutscene.CutsceneLibrary;
 import World.cutscene.CutsceneScript;
 import World.cutscene.ShopDialog;
+import World.gfx.CharacterSkinLibrary;
 import World.gfx.DungeonTextures;
 import gfx.HiDpiScaler;
 import launcher.ControlAction;
@@ -54,6 +55,7 @@ import java.io.InputStream;
 import java.io.Serial;
 import java.io.Serializable;
 import java.security.SecureRandom;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -67,6 +69,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Top-down dungeon crawler panel with persistent rooms and procedural generation.
@@ -91,7 +94,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private static final int MINIMAP_MAX_WIDTH = 220;
     private static final int MINIMAP_MAX_HEIGHT = 220;
     private static final int MINIMAP_HEADER = 26;
-    private static final int MINIMAP_FOOTER = 36;
+    private static final int MINIMAP_FOOTER = 92;
     private static final int MINIMAP_HORIZONTAL_PADDING = 12;
 
     enum T { VOID, FLOOR, WALL, DOOR }
@@ -102,6 +105,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     enum WeaponType { CLAWS, SWORD, HAMMER, BOW, STAFF }
 
     enum ProjectileKind { ORB, ARROW }
+
+    private enum MinimapRoomKind { CURRENT, BOSS_ACTIVE, BOSS_DEFEATED, SHOP, VISITED, ACCESSIBLE, LOCKED, UNKNOWN }
 
     private static final List<BossBattlePanel.BossKind> STORY_BOSS_SEQUENCE = List.of(
             BossBattlePanel.BossKind.GOLLUM,
@@ -449,6 +454,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         visited.add(new Point(worldPos));
         ensureShopDoor(room, worldPos);
         showMessage(texts.text("intro"));
+        persistProgressAsync("initial run");
         SwingUtilities.invokeLater(this::playPrologueIfNeeded);
     }
 
@@ -514,31 +520,61 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (!introShown) {
             SwingUtilities.invokeLater(this::playPrologueIfNeeded);
         }
+        persistProgressAsync("restored run");
+    }
+
+    private void persistProgressAsync(String reason) {
+        SwingUtilities.invokeLater(() -> persistProgress(reason));
+    }
+
+    private void persistProgress(String reason) {
+        try {
+            saveHandler.accept(snapshot());
+        } catch (RuntimeException ex) {
+            System.err.println("[DungeonRooms] Failed to persist " + reason + ": " + ex.getMessage());
+        }
+    }
+
+    private boolean cutscenesEnabled() {
+        return settings == null || settings.cutscenesEnabled();
     }
 
     private void refreshArtAssets() {
         textureEpoch++;
         markAllRoomsDirty();
         textures = DungeonTextures.load(TILE);
-        playerIdleFrames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
-        if (playerIdleFrames == null) {
-            playerIdleFrames = fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
-        }
+        playerIdleFrames = CharacterSkinLibrary.loadIdleAnimation("hero",
+                () -> {
+                    BufferedImage[] frames = loadSpriteSequence(PLAYER_IDLE_PREFIX, 0, 3);
+                    return frames != null ? frames : fallbackIdleFrames(new Color(255, 214, 102), new Color(40, 30, 10));
+                },
+                "/resources/sprites/Knight/Idle",
+                "/resources/sprites/Knight",
+                "/resources/sprites/Hero");
         playerIdleFrames = ensureScaledFrames(playerIdleFrames, PLAYER_SIZE, PLAYER_SIZE);
-        defaultEnemyFrames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
-        if (defaultEnemyFrames == null) {
-            defaultEnemyFrames = fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
-        }
+
+        defaultEnemyFrames = CharacterSkinLibrary.loadIdleAnimation("enemy_imp_default",
+                () -> {
+                    BufferedImage[] frames = loadSpriteSequence(ENEMY_IDLE_PREFIX, 0, 3);
+                    return frames != null ? frames : fallbackIdleFrames(new Color(198, 72, 72), new Color(38, 20, 20));
+                },
+                "/resources/sprites/Imp/Idle",
+                "/resources/sprites/Imp");
         defaultEnemyFrames = ensureScaledFrames(defaultEnemyFrames, defaultEnemySize(EnemyType.ZOMBIE));
+
         enemyIdleAnimations.clear();
         for (EnemyType type : EnemyType.values()) {
-            enemyIdleAnimations.put(type,
-                    ensureScaledFrames(loadEnemyAnimation(type), defaultEnemySize(type)));
+            BufferedImage[] frames = loadEnemyAnimation(type);
+            enemyIdleAnimations.put(type, ensureScaledFrames(frames, defaultEnemySize(type)));
         }
-        bossIdleFrames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
-        if (bossIdleFrames == null) {
-            bossIdleFrames = fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
-        }
+
+        bossIdleFrames = CharacterSkinLibrary.loadIdleAnimation("boss_guardian",
+                () -> loadBossIdleFallback(),
+                "/resources/bosses/Bigzombie",
+                "/resources/bosses/Guardians",
+                "/resources/bosses",
+                "/resources/sprites/Bigzombie/Idle",
+                "/resources/sprites/Bigzombie");
         bossIdleFrames = ensureScaledFrames(bossIdleFrames, (int) (TILE * 1.4));
         weaponTextures = new EnumMap<>(WeaponType.class);
         loadWeaponTextures();
@@ -765,19 +801,17 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private BufferedImage[] loadEnemyAnimation(EnemyType type) {
-        String prefix = switch (type) {
-            case ZOMBIE -> "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
-            case IMP -> ENEMY_IDLE_PREFIX;
-            case KNIGHT -> "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
-            case OGRE -> "resources/sprites/Ogre/ogre_idle_anim_f";
-            case PUMPKIN -> "resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f";
-            case SKELETON -> "resources/sprites/Skeleton/skelet_idle_anim_f";
-            case WIZARD -> "resources/sprites/Wizard/wizzard_m_idle_anim_f";
+        EnemyType resolvedType = type == null ? EnemyType.ZOMBIE : type;
+        Color[] palette = enemyFallbackPalette(resolvedType);
+        Supplier<BufferedImage[]> fallback = () -> {
+            BufferedImage[] frames = loadSpriteSequence(enemySpritePrefix(resolvedType), 0, 3);
+            return frames != null && frames.length > 0 ? frames : fallbackIdleFrames(palette[0], palette[1]);
         };
-        BufferedImage[] frames = loadSpriteSequence(prefix, 0, 3);
+        BufferedImage[] frames = CharacterSkinLibrary.loadIdleAnimation(enemySkinCacheKey(resolvedType),
+                fallback,
+                enemySkinDirectories(resolvedType));
         if (frames == null || frames.length == 0) {
-            Color[] palette = enemyFallbackPalette(type);
-            frames = fallbackIdleFrames(palette[0], palette[1]);
+            frames = fallback.get();
         }
         return frames;
     }
@@ -792,6 +826,68 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case SKELETON -> new Color[]{new Color(230, 230, 230), new Color(76, 86, 106)};
             case WIZARD -> new Color[]{new Color(120, 90, 200), new Color(40, 28, 70)};
         };
+    }
+
+    private String enemySpritePrefix(EnemyType type) {
+        return switch (type) {
+            case ZOMBIE -> "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
+            case IMP -> ENEMY_IDLE_PREFIX;
+            case KNIGHT -> "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
+            case OGRE -> "resources/sprites/Ogre/ogre_idle_anim_f";
+            case PUMPKIN -> "resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f";
+            case SKELETON -> "resources/sprites/Skeleton/skelet_idle_anim_f";
+            case WIZARD -> "resources/sprites/Wizard/wizzard_m_idle_anim_f";
+        };
+    }
+
+    private String enemySkinCacheKey(EnemyType type) {
+        return "enemy_" + (type == null ? "unknown" : type.name().toLowerCase(Locale.ENGLISH));
+    }
+
+    private String[] enemySkinDirectories(EnemyType type) {
+        if (type == null) {
+            return new String[0];
+        }
+        return switch (type) {
+            case ZOMBIE -> new String[]{
+                    "/resources/sprites/Bigzombie/Idle",
+                    "/resources/sprites/Bigzombie",
+                    "/resources/sprites/Zombie",
+                    "/resources/bosses/Gollum"
+            };
+            case IMP -> new String[]{
+                    "/resources/sprites/Imp/Idle",
+                    "/resources/sprites/Imp"
+            };
+            case KNIGHT -> new String[]{
+                    "/resources/sprites/Knight/Idle",
+                    "/resources/sprites/Knight"
+            };
+            case OGRE -> new String[]{
+                    "/resources/sprites/Ogre/Idle",
+                    "/resources/sprites/Ogre"
+            };
+            case PUMPKIN -> new String[]{
+                    "/resources/sprites/Pumpkin/Idle",
+                    "/resources/sprites/Pumpkin"
+            };
+            case SKELETON -> new String[]{
+                    "/resources/sprites/Skeleton/Idle",
+                    "/resources/sprites/Skeleton"
+            };
+            case WIZARD -> new String[]{
+                    "/resources/sprites/Wizard/Idle",
+                    "/resources/sprites/Wizard"
+            };
+        };
+    }
+
+    private BufferedImage[] loadBossIdleFallback() {
+        BufferedImage[] frames = loadSpriteSequence(BOSS_IDLE_PREFIX, 0, 3);
+        if (frames != null && frames.length > 0) {
+            return frames;
+        }
+        return fallbackIdleFrames(new Color(120, 210, 150), new Color(32, 60, 40));
     }
 
     private BufferedImage createProjectileTexture(Color core, Color mid, Color edge) {
@@ -1074,6 +1170,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (target == null || anchor == null) {
             return;
         }
+        if (target.shopDoor != null) {
+            shopRoom = new Point(anchor);
+            shopDoorFacing = target.shopDoor;
+            shopInitialized = true;
+            return;
+        }
         Dir door = selectShopDoor(target, anchor);
         target.shopDoor = door;
         shopRoom = new Point(anchor);
@@ -1172,6 +1274,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         introShown = true;
+        if (!cutscenesEnabled()) {
+            return;
+        }
         pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                 CutsceneLibrary.prologue()));
     }
@@ -1181,6 +1286,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         goldenKnightIntroShown = true;
+        if (!cutscenesEnabled()) {
+            return;
+        }
         pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                 CutsceneLibrary.goldenKnightMonologue()));
     }
@@ -1201,21 +1309,32 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         CutsceneScript script = CutsceneLibrary.bossPrelude(encounter.kind, storyChapterFor(encounter.kind));
         encounter.preludeShown = true;
+        if (!cutscenesEnabled()) {
+            return;
+        }
         if (script == null || script.slides().isEmpty()) {
             return;
         }
-        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this), script));
+        CutsceneScript finalScript = script;
+        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this), finalScript));
     }
 
     private void playBossEpilogue(BossBattlePanel.BossKind kind) {
         if (kind == null || kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
             return;
         }
+        if (!cutscenesEnabled()) {
+            return;
+        }
         CutsceneScript script = CutsceneLibrary.bossEpilogue(kind, storyChapterFor(kind));
+        if (script == null || script.slides().isEmpty()) {
+            script = CutsceneLibrary.defaultBossVictory(kind);
+        }
         if (script == null || script.slides().isEmpty()) {
             return;
         }
-        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this), script));
+        CutsceneScript finalScript = script;
+        pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this), finalScript));
     }
 
     private void handleGameWon() {
@@ -1223,6 +1342,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         finaleShown = true;
+        if (!cutscenesEnabled()) {
+            JOptionPane.showMessageDialog(DungeonRooms.this,
+                    "You saved the queen! Peace returns to the realm.",
+                    "Victory",
+                    JOptionPane.INFORMATION_MESSAGE);
+            exitHandler.run();
+            return;
+        }
         pauseForOverlay(() -> {
             CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                     CutsceneLibrary.queenRescued());
@@ -1717,6 +1844,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
+        double angle = enemy.facingAngle;
+        if (player != null) {
+            double centerX = player.x + player.width / 2.0;
+            double centerY = player.y + player.height / 2.0;
+            double computed = Math.atan2(centerY - enemy.y, centerX - enemy.x);
+            if (Double.isFinite(computed)) {
+                angle = computed;
+            }
+        }
         enemy.weapon = WeaponType.STAFF;
         enemy.weaponAngle = angle;
         enemy.attackAnimDuration = 20;
@@ -2191,12 +2327,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             keysHeld = 0;
             statusMessage = "";
             statusTicks = 0;
+            shopRoom = null;
+            shopDoorFacing = null;
+            shopInitialized = false;
             initializeBossPool();
             worldPos = new Point(0, 0);
             room = makeOrGetRoom(worldPos, null);
             spawnEnemiesIfNeeded(worldPos, room);
             visited.add(new Point(worldPos));
             placePlayerAtCenter();
+            ensureShopDoor(room, worldPos);
             showMessage(texts.text("respawn"));
             repaint();
             requestFocusInWindow();
@@ -3484,6 +3624,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (world != null) {
             known.addAll(world.keySet());
         }
+        if (bossEncounters != null) {
+            known.addAll(bossEncounters.keySet());
+        }
         known.add(new Point(worldPos));
         known.addAll(visitedRooms);
 
@@ -3494,6 +3637,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
             for (Dir door : roomData.doors) {
                 Point neighbour = step(roomPos, door);
+                if (neighbour == null) {
+                    continue;
+                }
                 if (visitedRooms.contains(neighbour)) {
                     known.add(neighbour);
                     continue;
@@ -3621,73 +3767,362 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             if (p == null) {
                 continue;
             }
-            Room roomData = world.get(p);
-            if (roomData == null) {
-                continue;
-            }
             Rectangle rect = cellRects.get(pointKey(p));
             if (rect == null) {
                 continue;
             }
             int drawX = rect.x + offset;
             int drawY = rect.y + offset;
-            Color fill;
-            if (p.equals(worldPos)) {
-                fill = new Color(255, 240, 160, 240);
-            } else if (visitedRooms.contains(p)) {
-                fill = new Color(82, 144, 182, 228);
-            } else if (accessible.contains(p)) {
-                fill = new Color(138, 201, 38, 220);
-            } else if (locked.contains(p)) {
-                fill = new Color(220, 170, 90, 220);
-            } else {
-                fill = new Color(80, 96, 120, 160);
-            }
-            overlay.setColor(fill);
-            overlay.fillRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            Room roomData = world.get(p);
             BossEncounter encounter = bossEncounters.get(p);
-            if (encounter != null && !encounter.defeated) {
-                overlay.setColor(new Color(210, 120, 200, 232));
-                overlay.setStroke(new BasicStroke(2f));
-                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
-            } else if (p.equals(worldPos)) {
-                overlay.setColor(new Color(255, 255, 255, 230));
-                overlay.setStroke(new BasicStroke(1.8f));
-                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
-            }
-            if (roomData.shopDoor != null) {
-                overlay.setColor(new Color(255, 214, 120, 240));
-                int iconSize = Math.max(6, roomSize / 3);
-                int iconX = drawX + roomSize - iconSize - 4;
-                int iconY = drawY + 4;
-                overlay.fillOval(iconX, iconY, iconSize, iconSize);
-                overlay.setColor(new Color(64, 40, 12, 220));
-                Font originalFont = overlay.getFont();
-                overlay.setFont(originalFont.deriveFont(Font.BOLD, Math.max(10f, iconSize - 2f)));
-                overlay.drawString("S", iconX + iconSize / 4f, iconY + iconSize * 0.8f);
-                overlay.setFont(originalFont);
-            }
+            MinimapRoomKind kind = classifyMinimapRoom(p, roomData, encounter, visitedRooms, accessible, locked);
+            overlay.setColor(minimapFillColour(kind));
+            overlay.fillRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            decorateMinimapCell(overlay, drawX, drawY, roomSize, kind, roomData, p);
         }
 
+        drawShopIndicator(overlay, cellCenters, cellSize);
+        drawMinimapLegend(overlay, mapX, mapY, mapHeight, cellSize);
+
         int footerY = mapY + mapHeight - 18;
+        int statsX = mapX + mapWidth - MINIMAP_HORIZONTAL_PADDING - 150;
+        statsX = Math.max(mapX + MINIMAP_HORIZONTAL_PADDING + 120, statsX);
         overlay.setStroke(originalStroke);
         overlay.setColor(new Color(210, 226, 232));
         DialogueText.drawString(overlay,
                 texts.text("hud_rooms", visitedRooms.size()).toUpperCase(Locale.ENGLISH),
-                mapX + MINIMAP_HORIZONTAL_PADDING, footerY);
+                statsX, footerY);
         DialogueText.drawString(overlay,
                 texts.text("hud_exits", accessible.size()).toUpperCase(Locale.ENGLISH),
-                mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 16);
+                statsX, footerY + 16);
         if (!locked.isEmpty()) {
             overlay.setColor(new Color(235, 210, 160));
             DialogueText.drawString(overlay,
                     texts.text("hud_locked", locked.size()).toUpperCase(Locale.ENGLISH),
-                    mapX + MINIMAP_HORIZONTAL_PADDING, footerY + 32);
+                    statsX, footerY + 32);
         }
 
         overlay.setColor(originalColour);
         overlay.setStroke(originalStroke);
         return bounds;
+    }
+
+    private MinimapRoomKind classifyMinimapRoom(Point position,
+                                                Room roomData,
+                                                BossEncounter encounter,
+                                                Set<Point> visitedRooms,
+                                                Set<Point> accessible,
+                                                Set<Point> locked) {
+        if (position == null) {
+            return MinimapRoomKind.UNKNOWN;
+        }
+        if (position.equals(worldPos)) {
+            return MinimapRoomKind.CURRENT;
+        }
+        if (encounter != null) {
+            return encounter.defeated ? MinimapRoomKind.BOSS_DEFEATED : MinimapRoomKind.BOSS_ACTIVE;
+        }
+        if (roomData != null && roomData.shopDoor != null) {
+            return MinimapRoomKind.SHOP;
+        }
+        if (visitedRooms.contains(position)) {
+            return MinimapRoomKind.VISITED;
+        }
+        if (accessible.contains(position)) {
+            return MinimapRoomKind.ACCESSIBLE;
+        }
+        if (locked.contains(position)) {
+            return MinimapRoomKind.LOCKED;
+        }
+        return MinimapRoomKind.UNKNOWN;
+    }
+
+    private Color minimapFillColour(MinimapRoomKind kind) {
+        return switch (kind) {
+            case CURRENT -> new Color(255, 240, 160, 240);
+            case BOSS_ACTIVE -> new Color(210, 120, 200, 220);
+            case BOSS_DEFEATED -> new Color(170, 150, 220, 220);
+            case SHOP -> new Color(255, 214, 120, 230);
+            case VISITED -> new Color(82, 144, 182, 228);
+            case ACCESSIBLE -> new Color(138, 201, 38, 220);
+            case LOCKED -> new Color(220, 170, 90, 220);
+            case UNKNOWN -> new Color(80, 96, 120, 160);
+        };
+    }
+
+    private void decorateMinimapCell(Graphics2D overlay,
+                                     int drawX,
+                                     int drawY,
+                                     int roomSize,
+                                     MinimapRoomKind kind,
+                                     Room roomData,
+                                     Point position) {
+        Stroke oldStroke = overlay.getStroke();
+        Color oldColour = overlay.getColor();
+        switch (kind) {
+            case CURRENT -> {
+                overlay.setColor(new Color(255, 255, 255, 230));
+                overlay.setStroke(new BasicStroke(1.8f));
+                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+            }
+            case BOSS_ACTIVE -> {
+                overlay.setColor(new Color(255, 170, 240, 240));
+                overlay.setStroke(new BasicStroke(2.2f));
+                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+                drawBossGlyph(overlay, drawX, drawY, roomSize, roomSize, false);
+            }
+            case BOSS_DEFEATED -> {
+                overlay.setColor(new Color(200, 190, 255, 220));
+                overlay.setStroke(new BasicStroke(1.8f));
+                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+                drawBossGlyph(overlay, drawX, drawY, roomSize, roomSize, true);
+            }
+            case SHOP -> {
+                overlay.setColor(new Color(120, 72, 18, 200));
+                overlay.setStroke(new BasicStroke(1.6f));
+                overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+                drawShopGlyph(overlay, drawX, drawY, roomSize, roomSize);
+            }
+            default -> {
+                if (visited != null && position != null && visited.contains(position)) {
+                    overlay.setColor(new Color(255, 255, 255, 60));
+                    overlay.setStroke(new BasicStroke(1f));
+                    overlay.drawRoundRect(drawX, drawY, roomSize, roomSize, 8, 8);
+                }
+            }
+        }
+        overlay.setStroke(oldStroke);
+        overlay.setColor(oldColour);
+    }
+
+    private void drawShopIndicator(Graphics2D overlay, Map<String, Point> cellCenters, int cellSize) {
+        if (overlay == null || cellCenters == null || worldPos == null) {
+            return;
+        }
+        Point currentCentre = cellCenters.get(pointKey(worldPos));
+        if (currentCentre == null) {
+            return;
+        }
+        Point arrowTarget = null;
+        Room currentRoom = world.get(worldPos);
+        if (currentRoom != null && currentRoom.shopDoor != null) {
+            Point vector = directionVector(currentRoom.shopDoor);
+            if (vector != null) {
+                arrowTarget = new Point(
+                        currentCentre.x + vector.x * cellSize / 2,
+                        currentCentre.y + vector.y * cellSize / 2);
+            }
+        }
+        if (arrowTarget == null) {
+            List<Point> path = pathToNearestShop(worldPos);
+            if (!path.isEmpty()) {
+                if (path.size() >= 2) {
+                    arrowTarget = cellCenters.get(pointKey(path.get(1)));
+                } else {
+                    Room shopRoom = world.get(path.get(0));
+                    if (shopRoom != null && shopRoom.shopDoor != null) {
+                        Point vector = directionVector(shopRoom.shopDoor);
+                        if (vector != null) {
+                            arrowTarget = new Point(
+                                    currentCentre.x + vector.x * cellSize / 2,
+                                    currentCentre.y + vector.y * cellSize / 2);
+                        }
+                    }
+                }
+            }
+        }
+        if (arrowTarget == null) {
+            return;
+        }
+        drawMinimapArrow(overlay, currentCentre, arrowTarget);
+    }
+
+    private void drawMinimapLegend(Graphics2D overlay, int mapX, int mapY, int mapHeight, int cellSize) {
+        if (overlay == null) {
+            return;
+        }
+        int legendX = mapX + MINIMAP_HORIZONTAL_PADDING;
+        int legendY = mapY + mapHeight - MINIMAP_FOOTER + 8;
+        int boxSize = Math.max(12, Math.min(cellSize, 18));
+        int spacing = Math.max(boxSize + 6, overlay.getFontMetrics().getHeight() + 6);
+        drawLegendEntry(overlay, legendX, legendY, boxSize, MinimapRoomKind.VISITED, "REGULAR");
+        legendY += spacing;
+        drawLegendEntry(overlay, legendX, legendY, boxSize, MinimapRoomKind.BOSS_ACTIVE, "BOSS");
+        legendY += spacing;
+        drawLegendEntry(overlay, legendX, legendY, boxSize, MinimapRoomKind.SHOP, "SHOP");
+        legendY += spacing;
+        drawLegendEntry(overlay, legendX, legendY, boxSize, MinimapRoomKind.UNKNOWN, "UNEXPLORED");
+    }
+
+    private void drawLegendEntry(Graphics2D overlay, int x, int y, int size, MinimapRoomKind kind, String label) {
+        Color oldColour = overlay.getColor();
+        Stroke oldStroke = overlay.getStroke();
+        overlay.setColor(minimapFillColour(kind));
+        overlay.fillRoundRect(x, y, size, size, 6, 6);
+        switch (kind) {
+            case BOSS_ACTIVE -> drawBossGlyph(overlay, x, y, size, size, false);
+            case SHOP -> drawShopGlyph(overlay, x, y, size, size);
+            default -> { }
+        }
+        overlay.setColor(new Color(0, 0, 0, 160));
+        overlay.setStroke(new BasicStroke(1f));
+        overlay.drawRoundRect(x, y, size, size, 6, 6);
+        overlay.setColor(new Color(214, 234, 242));
+        DialogueText.drawString(overlay, label.toUpperCase(Locale.ENGLISH), x + size + 8, y + Math.max(size - 4, 12));
+        overlay.setColor(oldColour);
+        overlay.setStroke(oldStroke);
+    }
+
+    private void drawBossGlyph(Graphics2D overlay, int drawX, int drawY, int width, int height, boolean defeated) {
+        Graphics2D g2 = (Graphics2D) overlay.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int glyphWidth = Math.max(8, width - 6);
+            int glyphHeight = Math.max(6, height / 2);
+            int baseX = drawX + (width - glyphWidth) / 2;
+            int baseY = drawY + (height - glyphHeight) / 2;
+            Color fill = defeated ? new Color(188, 178, 236, 215) : new Color(255, 170, 240, 230);
+            Color stroke = defeated ? new Color(120, 110, 180, 220) : new Color(180, 60, 160, 240);
+            Path2D.Double crown = new Path2D.Double();
+            crown.moveTo(baseX, baseY + glyphHeight);
+            crown.lineTo(baseX + glyphWidth * 0.2, baseY + glyphHeight * 0.4);
+            crown.lineTo(baseX + glyphWidth * 0.4, baseY + glyphHeight);
+            crown.lineTo(baseX + glyphWidth * 0.6, baseY + glyphHeight * 0.4);
+            crown.lineTo(baseX + glyphWidth * 0.8, baseY + glyphHeight);
+            crown.lineTo(baseX + glyphWidth, baseY + glyphHeight * 0.4);
+            crown.closePath();
+            g2.setColor(fill);
+            g2.fill(crown);
+            g2.setColor(stroke);
+            g2.setStroke(new BasicStroke(1.4f));
+            g2.draw(crown);
+            g2.setColor(new Color(255, 230, 255, 210));
+            int gemSize = Math.max(4, glyphWidth / 6);
+            g2.fillOval(baseX + glyphWidth / 2 - gemSize / 2, baseY + glyphHeight / 3, gemSize, gemSize);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private void drawShopGlyph(Graphics2D overlay, int drawX, int drawY, int width, int height) {
+        Graphics2D g2 = (Graphics2D) overlay.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int iconSize = Math.max(6, Math.min(width, height) / 2);
+            int iconX = drawX + width - iconSize - 4;
+            int iconY = drawY + 4;
+            g2.setColor(new Color(255, 214, 120, 240));
+            g2.fillOval(iconX, iconY, iconSize, iconSize);
+            g2.setColor(new Color(64, 40, 12, 220));
+            Font oldFont = g2.getFont();
+            g2.setFont(oldFont.deriveFont(Font.BOLD, Math.max(10f, iconSize - 2f)));
+            g2.drawString("S", iconX + iconSize / 4f, iconY + iconSize * 0.8f);
+            g2.setFont(oldFont);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private void drawMinimapArrow(Graphics2D overlay, Point from, Point to) {
+        if (overlay == null || from == null || to == null) {
+            return;
+        }
+        double dx = to.x - from.x;
+        double dy = to.y - from.y;
+        double len = Math.hypot(dx, dy);
+        if (len < 1e-3) {
+            return;
+        }
+        double startOffset = Math.min(6.0, Math.max(2.0, len * 0.15));
+        double endOffset = Math.min(12.0, Math.max(4.0, len * 0.3));
+        double startX = from.x + dx / len * startOffset;
+        double startY = from.y + dy / len * startOffset;
+        double endX = to.x - dx / len * endOffset;
+        double endY = to.y - dy / len * endOffset;
+        Stroke oldStroke = overlay.getStroke();
+        Color oldColour = overlay.getColor();
+        overlay.setStroke(new BasicStroke(2.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        Color arrowColour = new Color(255, 214, 120, 235);
+        overlay.setColor(arrowColour);
+        overlay.drawLine((int) Math.round(startX), (int) Math.round(startY),
+                (int) Math.round(endX), (int) Math.round(endY));
+        Path2D.Double head = new Path2D.Double();
+        double angle = Math.atan2(dy, dx);
+        double headSize = Math.max(8.0, len * 0.18);
+        head.moveTo(endX, endY);
+        head.lineTo(endX - Math.cos(angle - Math.PI / 6) * headSize,
+                endY - Math.sin(angle - Math.PI / 6) * headSize);
+        head.lineTo(endX - Math.cos(angle + Math.PI / 6) * headSize,
+                endY - Math.sin(angle + Math.PI / 6) * headSize);
+        head.closePath();
+        overlay.fill(head);
+        overlay.setStroke(oldStroke);
+        overlay.setColor(oldColour);
+    }
+
+    private List<Point> pathToNearestShop(Point start) {
+        if (start == null || world == null || world.isEmpty()) {
+            return List.of();
+        }
+        Set<Point> shopRooms = new HashSet<>();
+        for (Map.Entry<Point, Room> entry : world.entrySet()) {
+            if (entry.getValue() != null && entry.getValue().shopDoor != null) {
+                shopRooms.add(entry.getKey());
+            }
+        }
+        if (shopRooms.isEmpty()) {
+            return List.of();
+        }
+        ArrayDeque<Point> queue = new ArrayDeque<>();
+        Map<Point, Point> parent = new HashMap<>();
+        Set<Point> seen = new HashSet<>();
+        queue.add(start);
+        seen.add(start);
+        Point found = null;
+        while (!queue.isEmpty()) {
+            Point current = queue.removeFirst();
+            if (shopRooms.contains(current)) {
+                found = current;
+                break;
+            }
+            Room room = world.get(current);
+            if (room == null) {
+                continue;
+            }
+            for (Dir door : room.doors) {
+                Point neighbour = step(current, door);
+                if (neighbour == null || !seen.add(neighbour)) {
+                    continue;
+                }
+                if (!world.containsKey(neighbour)) {
+                    continue;
+                }
+                queue.add(neighbour);
+                parent.put(neighbour, current);
+            }
+        }
+        if (found == null) {
+            return List.of();
+        }
+        List<Point> path = new ArrayList<>();
+        Point cursor = found;
+        while (cursor != null) {
+            path.add(0, cursor);
+            cursor = parent.get(cursor);
+        }
+        return path;
+    }
+
+    private Point directionVector(Dir dir) {
+        if (dir == null) {
+            return null;
+        }
+        return switch (dir) {
+            case N -> new Point(0, -1);
+            case S -> new Point(0, 1);
+            case W -> new Point(-1, 0);
+            case E -> new Point(1, 0);
+        };
     }
 
     private String keyName(ControlAction action) {
