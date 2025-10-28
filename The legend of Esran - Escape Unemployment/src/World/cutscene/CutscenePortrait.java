@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -32,6 +33,7 @@ public enum CutscenePortrait {
     SHOPKEEPER("resources/sprites/Wizard/wizzard_m_idle_anim_f0.png", "/resources/Shop", 200);
 
     private static final Map<CutscenePortrait, BufferedImage> CACHE = new EnumMap<>(CutscenePortrait.class);
+    private static final EnumSet<CutscenePortrait> WARNED = EnumSet.noneOf(CutscenePortrait.class);
 
     private final String resourcePath;
     private final String directoryPath;
@@ -58,6 +60,7 @@ public enum CutscenePortrait {
             return fromResource;
         }
 
+        warnMissingPortrait(portrait);
         if (portrait == PRINCESS) {
             return generatePrincessPortrait(portrait.targetSize);
         }
@@ -119,6 +122,16 @@ public enum CutscenePortrait {
     private static String ensureLeadingSlash(String path) {
         String trimmed = path.trim();
         return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+    }
+
+    private static void warnMissingPortrait(CutscenePortrait portrait) {
+        synchronized (WARNED) {
+            if (!WARNED.add(portrait)) {
+                return;
+            }
+        }
+        System.err.println("CutscenePortrait: Missing portrait art for " + portrait.name()
+                + " in " + portrait.directoryPath);
     }
 
     private static int portraitScore(String path) {
