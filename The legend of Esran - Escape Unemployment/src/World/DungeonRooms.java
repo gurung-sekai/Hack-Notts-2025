@@ -454,6 +454,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         visited.add(new Point(worldPos));
         ensureShopDoor(room, worldPos);
         showMessage(texts.text("intro"));
+        persistProgressAsync("initial run");
         SwingUtilities.invokeLater(this::playPrologueIfNeeded);
     }
 
@@ -519,6 +520,23 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (!introShown) {
             SwingUtilities.invokeLater(this::playPrologueIfNeeded);
         }
+        persistProgressAsync("restored run");
+    }
+
+    private void persistProgressAsync(String reason) {
+        SwingUtilities.invokeLater(() -> persistProgress(reason));
+    }
+
+    private void persistProgress(String reason) {
+        try {
+            saveHandler.accept(snapshot());
+        } catch (RuntimeException ex) {
+            System.err.println("[DungeonRooms] Failed to persist " + reason + ": " + ex.getMessage());
+        }
+    }
+
+    private boolean cutscenesEnabled() {
+        return settings == null || settings.cutscenesEnabled();
     }
 
     private void refreshArtAssets() {
@@ -1152,6 +1170,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (target == null || anchor == null) {
             return;
         }
+        if (target.shopDoor != null) {
+            shopRoom = new Point(anchor);
+            shopDoorFacing = target.shopDoor;
+            shopInitialized = true;
+            return;
+        }
         Dir door = selectShopDoor(target, anchor);
         target.shopDoor = door;
         shopRoom = new Point(anchor);
@@ -1250,6 +1274,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         introShown = true;
+        if (!cutscenesEnabled()) {
+            return;
+        }
         pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                 CutsceneLibrary.prologue()));
     }
@@ -1259,6 +1286,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         goldenKnightIntroShown = true;
+        if (!cutscenesEnabled()) {
+            return;
+        }
         pauseForOverlay(() -> CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                 CutsceneLibrary.goldenKnightMonologue()));
     }
@@ -1279,6 +1309,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         CutsceneScript script = CutsceneLibrary.bossPrelude(encounter.kind, storyChapterFor(encounter.kind));
         encounter.preludeShown = true;
+        if (!cutscenesEnabled()) {
+            return;
+        }
         if (script == null || script.slides().isEmpty()) {
             return;
         }
@@ -1288,6 +1321,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void playBossEpilogue(BossBattlePanel.BossKind kind) {
         if (kind == null || kind == BossBattlePanel.BossKind.GOLDEN_KNIGHT) {
+            return;
+        }
+        if (!cutscenesEnabled()) {
             return;
         }
         CutsceneScript script = CutsceneLibrary.bossEpilogue(kind, storyChapterFor(kind));
@@ -1306,6 +1342,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         finaleShown = true;
+        if (!cutscenesEnabled()) {
+            JOptionPane.showMessageDialog(DungeonRooms.this,
+                    "You saved the queen! Peace returns to the realm.",
+                    "Victory",
+                    JOptionPane.INFORMATION_MESSAGE);
+            exitHandler.run();
+            return;
+        }
         pauseForOverlay(() -> {
             CutsceneDialog.play(SwingUtilities.getWindowAncestor(DungeonRooms.this),
                     CutsceneLibrary.queenRescued());
@@ -2283,12 +2327,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             keysHeld = 0;
             statusMessage = "";
             statusTicks = 0;
+            shopRoom = null;
+            shopDoorFacing = null;
+            shopInitialized = false;
             initializeBossPool();
             worldPos = new Point(0, 0);
             room = makeOrGetRoom(worldPos, null);
             spawnEnemiesIfNeeded(worldPos, room);
             visited.add(new Point(worldPos));
             placePlayerAtCenter();
+            ensureShopDoor(room, worldPos);
             showMessage(texts.text("respawn"));
             repaint();
             requestFocusInWindow();
