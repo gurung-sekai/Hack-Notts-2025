@@ -10,6 +10,10 @@ public class Battle {
     // Momentum tug-of-war: -3..+3 (positive favors a, negative favors b)
     private int momentum = 0;
 
+    private static int clampMomentum(int value) {
+        return Math.max(-3, Math.min(3, value));
+    }
+
     public Battle(Fighter a, Fighter b) { this.a = a; this.b = b; }
 
     public void run(Scanner in) {
@@ -71,7 +75,7 @@ public class Battle {
         if (tech.tag == Tag.INTERRUPT && t.charging != null) {
             System.out.println("Interrupt! " + t.name + "'s charge is canceled.");
             t.charging = null;
-            momentum += (u == a ? 1 : -1);
+            momentum = clampMomentum(momentum + (u == a ? 1 : -1));
         }
 
         if (tech.isUtility()) {
@@ -88,8 +92,7 @@ public class Battle {
             if (res.mult > 1.0) System.out.println("It resonates strongly!");
             else if (res.mult < 1.0) System.out.println("Resisted.");
 
-            momentum += (u == a ? tech.momentumDelta : -tech.momentumDelta);
-            momentum = Math.max(-3, Math.min(3, momentum));
+            momentum = clampMomentum(momentum + (u == a ? tech.momentumDelta : -tech.momentumDelta));
 
             if (tech.onHit != null) tech.onHit.accept(u, t);
         }

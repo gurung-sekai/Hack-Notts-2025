@@ -100,6 +100,7 @@ public class BossBattlePanel extends JPanel {
     private int floorCacheWidth = -1;
     private int floorCacheHeight = -1;
     private final Timer animationTimer;
+    private boolean lowFidelityMode = false;
 
     private long lastTickNs = 0;
     private double resolveLock = 0.0;
@@ -141,7 +142,7 @@ public class BossBattlePanel extends JPanel {
             }
         });
 
-        animationTimer = new Timer(1000 / 60, e -> tick());
+        animationTimer = new Timer(33, e -> tick());
         animationTimer.setInitialDelay(0);
         animationTimer.setCoalesce(true);
         animationTimer.start();
@@ -150,6 +151,18 @@ public class BossBattlePanel extends JPanel {
     /** Stop the animation timer so the panel can be disposed without background work. */
     public void shutdown() {
         animationTimer.stop();
+    }
+
+    /** Enable or disable a simplified render path for profiling. */
+    public void setLowFidelityMode(boolean enabled) {
+        if (this.lowFidelityMode != enabled) {
+            this.lowFidelityMode = enabled;
+            repaint();
+        }
+    }
+
+    public boolean isLowFidelityMode() {
+        return lowFidelityMode;
     }
 
     @Override public void addNotify() {
@@ -347,20 +360,28 @@ public class BossBattlePanel extends JPanel {
     @Override protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
 
         LayoutMetrics metrics = layoutMetrics();
-        heroVisual.ensureWarmed(metrics.scale());
-        bossVisual.ensureWarmed(metrics.scale());
+        if (heroVisual.needsWarm(metrics.scale())) {
+            heroVisual.ensureWarmed(metrics.scale());
+        }
+        if (bossVisual.needsWarm(metrics.scale())) {
+            bossVisual.ensureWarmed(metrics.scale());
+        }
 
         drawFloor(g2);
-        drawEffectsBehind(g2);
+        if (!lowFidelityMode) {
+            drawEffectsBehind(g2);
+        }
         drawFighter(g2, heroVisual, false, metrics);
         drawFighter(g2, bossVisual, true, metrics);
-        drawEffectsFront(g2);
-        drawFloatingTexts(g2, metrics);
+        if (!lowFidelityMode) {
+            drawEffectsFront(g2);
+            drawFloatingTexts(g2, metrics);
+        }
         drawHud(g2, metrics);
     }
 
@@ -376,8 +397,12 @@ public class BossBattlePanel extends JPanel {
 
     private void warmForCurrentLayout() {
         LayoutMetrics metrics = layoutMetrics();
-        heroVisual.ensureWarmed(metrics.scale());
-        bossVisual.ensureWarmed(metrics.scale());
+        if (heroVisual.needsWarm(metrics.scale())) {
+            heroVisual.ensureWarmed(metrics.scale());
+        }
+        if (bossVisual.needsWarm(metrics.scale())) {
+            bossVisual.ensureWarmed(metrics.scale());
+        }
     }
 
     private record LayoutMetrics(double scale, double offsetX, double offsetY) { }
@@ -615,7 +640,7 @@ public class BossBattlePanel extends JPanel {
         g2.setFont(smallFont);
         g2.setColor(Color.WHITE);
         int infoY = box.y + box.height - padding;
-        String momentum = "Momentum: " + engine.momentum;
+        String momentum = "Momentum: " + engine.heroMomentum();
         int momentumWidth = g2.getFontMetrics().stringWidth(momentum);
         g2.drawString(momentum, box.x + box.width - padding - momentumWidth, infoY);
         if (phase != Phase.PLAYER_SELECT) {
@@ -810,6 +835,13 @@ public class BossBattlePanel extends JPanel {
 
         double maxWidthPx(double layoutScale) {
             return maxWidthBase > 0 ? maxWidthBase * layoutScale : Double.POSITIVE_INFINITY;
+        }
+
+        boolean needsWarm(double layoutScale) {
+            if (!Double.isFinite(layoutScale) || layoutScale <= 0) {
+                return false;
+            }
+            return !Double.isFinite(warmedScale) || Math.abs(warmedScale - layoutScale) >= 1e-3;
         }
 
         void ensureWarmed(double layoutScale) {
@@ -1148,6 +1180,9 @@ public class BossBattlePanel extends JPanel {
     // Battle resolution engine for the panel
     // ---------------------------------------------------------------------
     private static class BattleEngine {
+        private static final int MOMENTUM_MIN = 0;
+        private static final int MOMENTUM_MAX = 6;
+        private static final int MOMENTUM_NEUTRAL = (MOMENTUM_MIN + MOMENTUM_MAX) / 2;
         private final Fighter hero;
         private final Fighter boss;
         private final Consumer<Outcome> onEnd;
@@ -1165,7 +1200,77 @@ public class BossBattlePanel extends JPanel {
             this.hero = hero;
             this.boss = boss;
             this.onEnd = onEnd;
-            this.momentum = Math.max(-2, Math.min(2, initialMomentum));
+            this.momentum = clampMomentum(initialMomentum + MOMENTUM_NEUTRAL);
+        }
+
+        private int clampMomentum(int value) {
+            return Math.max(MOMENTUM_MIN, Math.min(MOMENTUM_MAX, value));
+        }
+
+        private void shiftMomentumTowardHero(int delta) {
+            if (delta <= 0) {
+                return;
+            }
+            momentum = clampMomentum(momentum + delta);
+        }
+
+        private void shiftMomentumTowardBoss(int delta) {
+            if (delta <= 0) {
+                return;
+            }
+            momentum = clampMomentum(momentum - delta);
+        }
+
+        private int heroMomentumBiasValue() {
+            return Math.max(0, momentum - MOMENTUM_NEUTRAL);
+        }
+
+        private int bossMomentumBiasValue() {
+            return Math.max(0, MOMENTUM_MAX - momentum);
+        }
+
+        private double heroMomentumBias() {
+            return heroMomentumBiasValue() * 0.3 / MOMENTUM_MAX;
+        }
+
+        private double bossMomentumBias() {
+            return bossMomentumBiasValue() * 0.3 / MOMENTUM_MAX;
+        }
+
+        private int heroMomentumForAi() {
+            return clampMomentum(momentum) - MOMENTUM_NEUTRAL;
+        }
+
+        private int momentumFor(Fighter user) {
+            int heroPerspective = heroMomentumForAi();
+            return user == hero ? heroPerspective : -heroPerspective;
+        }
+
+        private void applyMomentumSwing(Fighter user, int delta) {
+            if (delta == 0) {
+                return;
+            }
+            if (user == hero) {
+                if (delta > 0) {
+                    shiftMomentumTowardHero(delta);
+                } else {
+                    shiftMomentumTowardBoss(-delta);
+                }
+            } else {
+                if (delta > 0) {
+                    shiftMomentumTowardBoss(delta);
+                } else {
+                    shiftMomentumTowardHero(-delta);
+                }
+            }
+        }
+
+        private void penalizeHeroForPattern() {
+            shiftMomentumTowardBoss(1);
+        }
+
+        int heroMomentum() {
+            return momentum;
         }
 
         RoundOutcome resolve(int heroIndex) {
@@ -1185,7 +1290,7 @@ public class BossBattlePanel extends JPanel {
                 return out;
             }
 
-            Technique bossTech = SimpleAi.choose(boss, hero, momentum);
+            Technique bossTech = SimpleAi.choose(boss, hero, heroMomentumForAi());
             RoundOutcome outcome = new RoundOutcome();
 
             Act first = decideOrder(heroTech, bossTech);
@@ -1207,8 +1312,8 @@ public class BossBattlePanel extends JPanel {
         }
 
         private Act decideOrder(Technique heroTech, Technique bossTech) {
-            double biasHero = (momentum > 0 ? 0.3 : 0.0) + (hero.status == Status.SHOCKED ? -0.2 : 0);
-            double biasBoss = (momentum < 0 ? 0.3 : 0.0) + (boss.status == Status.SHOCKED ? -0.2 : 0);
+            double biasHero = heroMomentumBias() + (hero.status == Status.SHOCKED ? -0.2 : 0);
+            double biasBoss = bossMomentumBias() + (boss.status == Status.SHOCKED ? -0.2 : 0);
             double orderHero = heroTech.priority + hero.base.speed / 10.0 + biasHero + (hero.charging != null ? 0.5 : 0);
             double orderBoss = bossTech.priority + boss.base.speed / 10.0 + biasBoss + (boss.charging != null ? 0.5 : 0);
             boolean heroFirst = (orderHero == orderBoss) ? Math.random() < 0.5 : orderHero > orderBoss;
@@ -1251,7 +1356,7 @@ public class BossBattlePanel extends JPanel {
                     boss.base.guard += 1;
                     out.messages.add(boss.name + " anticipates the pattern and fortifies its stance!");
                     out.events.add(Event.guard(boss, "Guard ↑"));
-                    momentum = Math.max(-3, momentum - 1);
+                    penalizeHeroForPattern();
                 }
             }
 
@@ -1281,13 +1386,13 @@ public class BossBattlePanel extends JPanel {
                 target.charging = null;
                 out.messages.add("Interrupt! " + target.name + " loses their charge.");
                 out.events.add(Event.interrupt(user, target, tech));
-                momentum += (user == hero ? 1 : -1);
+                applyMomentumSwing(user, 1);
             }
 
             if (tech.isUtility()) {
                 applyOnHit(tech, user, target, out);
             } else {
-                DamageCalc.Result res = DamageCalc.compute(user, target, tech, (user == hero ? momentum : -momentum));
+                DamageCalc.Result res = DamageCalc.compute(user, target, tech, momentumFor(user));
                 int damage = res.damage;
                 if (tech.tag == Tag.GUARD) {
                     damage = (int) Math.ceil(damage * 0.5);
@@ -1298,8 +1403,7 @@ public class BossBattlePanel extends JPanel {
                 if (res.crit) out.messages.add("Critical strike!");
                 if (res.mult > 1.0) out.messages.add("It resonates strongly!");
                 else if (res.mult < 1.0) out.messages.add("Resisted.");
-                momentum += (user == hero ? tech.momentumDelta : -tech.momentumDelta);
-                momentum = Math.max(-3, Math.min(3, momentum));
+                applyMomentumSwing(user, tech.momentumDelta);
                 applyOnHit(tech, user, target, out);
             }
 
