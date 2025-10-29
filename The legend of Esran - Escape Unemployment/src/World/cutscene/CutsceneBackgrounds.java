@@ -5,6 +5,7 @@ import gfx.HiDpiScaler;
 import util.ResourceLoader;
 
 import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
@@ -34,7 +35,9 @@ public final class CutsceneBackgrounds {
      * Animated glow for the Golden Knight's throne room.
      */
     public static AnimatedBackdrop goldenThrone() {
-        return cachedSequence("goldenThrone", CutsceneBackgrounds::proceduralEmber, 6,
+        return tintedSequence("goldenThrone", CutsceneBackgrounds::proceduralEmber, 6,
+                new Color(255, 208, 96), 0.28f,
+                "/resources/Cutscene/Throne",
                 "/resources/Cutscene/GoldenKnight/backgrounds",
                 "/resources/Cutscene/GoldenKnight");
     }
@@ -63,7 +66,9 @@ public final class CutsceneBackgrounds {
      * Animated backdrop for the hero's determination scenes.
      */
     public static AnimatedBackdrop heroResolve() {
-        return cachedSequence("heroResolve", CutsceneBackgrounds::proceduralResolve, 6,
+        return tintedSequence("heroResolve", CutsceneBackgrounds::proceduralResolve, 6,
+                new Color(96, 176, 255), 0.24f,
+                "/resources/Cutscene/Dungeon",
                 "/resources/Cutscene/Hero",
                 "/resources/Cutscene/Bridge",
                 "/resources/Cutscene/Confrontation");
@@ -87,7 +92,8 @@ public final class CutsceneBackgrounds {
      * Animated background used by the apothecary shop overlay.
      */
     public static AnimatedBackdrop shopInterior() {
-        return cachedSequence("shopInterior", CutsceneBackgrounds::proceduralShop, 5,
+        return tintedSequence("shopInterior", CutsceneBackgrounds::proceduralShop, 5,
+                new Color(255, 204, 140), 0.22f,
                 "/resources/Cutscene/Shop",
                 "/resources/Shop/backgrounds",
                 "/resources/Shop");
@@ -98,12 +104,89 @@ public final class CutsceneBackgrounds {
         return shopInterior();
     }
 
+    /**
+     * Mossy caverns framing the treasure hoard of the goblin boss.
+     */
+    public static AnimatedBackdrop bossCatacombs() {
+        return tintedSequence("bossCatacombs", CutsceneBackgrounds::proceduralCatacombs, 6,
+                new Color(120, 210, 150), 0.32f,
+                "/resources/Cutscene/Dungeon");
+    }
+
+    /**
+     * Ethereal mausoleum haze for the warden of souls.
+     */
+    public static AnimatedBackdrop bossShroud() {
+        return tintedSequence("bossShroud", CutsceneBackgrounds::proceduralShroud, 6,
+                new Color(140, 130, 220), 0.30f,
+                "/resources/Cutscene/Dungeon");
+    }
+
+    /**
+     * Blazing forge backdrops for fiery lieutenants.
+     */
+    public static AnimatedBackdrop bossFoundry() {
+        return tintedSequence("bossFoundry", CutsceneBackgrounds::proceduralFoundry, 6,
+                new Color(255, 148, 68), 0.28f,
+                "/resources/Cutscene/Throne",
+                "/resources/Cutscene/Shop");
+    }
+
+    /**
+     * Gleaming mechanical glow for the automaton guardian.
+     */
+    public static AnimatedBackdrop bossFoundrySteel() {
+        return tintedSequence("bossFoundrySteel", CutsceneBackgrounds::proceduralFoundrySteel, 6,
+                new Color(160, 210, 255), 0.22f,
+                "/resources/Cutscene/Shop");
+    }
+
+    /**
+     * Arcane ripple for mind-bending sorcerers.
+     */
+    public static AnimatedBackdrop bossArcana() {
+        return tintedSequence("bossArcana", CutsceneBackgrounds::proceduralArcana, 6,
+                new Color(220, 160, 255), 0.30f,
+                "/resources/Cutscene/Throne");
+    }
+
+    /**
+     * Shimmering mirage backdrop for illusion weavers.
+     */
+    public static AnimatedBackdrop bossMirage() {
+        return tintedSequence("bossMirage", CutsceneBackgrounds::proceduralMirage, 6,
+                new Color(140, 240, 255), 0.28f,
+                "/resources/Cutscene/Throne");
+    }
+
+    /**
+     * Verdant glow for nature-twisted adversaries.
+     */
+    public static AnimatedBackdrop bossWildwood() {
+        return tintedSequence("bossWildwood", CutsceneBackgrounds::proceduralWildwood, 6,
+                new Color(150, 220, 140), 0.30f,
+                "/resources/Cutscene/Dungeon");
+    }
+
     private static AnimatedBackdrop cachedSequence(String key, Supplier<AnimatedBackdrop> fallback,
                                                    int frameTicks, String... directories) {
+        return sequenceFrom(key, fallback, frameTicks, null, 0f, directories);
+    }
+
+    private static AnimatedBackdrop tintedSequence(String key, Supplier<AnimatedBackdrop> fallback,
+                                                   int frameTicks, Color overlay, float overlayAlpha,
+                                                   String... directories) {
+        String cacheKey = overlay == null ? key : key + "#" + Integer.toHexString(overlay.getRGB()) + "@" + overlayAlpha;
+        return sequenceFrom(cacheKey, fallback, frameTicks, overlay, overlayAlpha, directories);
+    }
+
+    private static AnimatedBackdrop sequenceFrom(String key, Supplier<AnimatedBackdrop> fallback,
+                                                 int frameTicks, Color overlay, float overlayAlpha,
+                                                 String... directories) {
         return CACHE.computeIfAbsent(key, ignored -> {
             BufferedImage[] frames = loadFrames(directories);
             if (frames.length > 0) {
-                return new SequenceBackdrop(frames, frameTicks);
+                return new SequenceBackdrop(frames, frameTicks, overlay, overlayAlpha);
             }
             return fallback.get();
         });
@@ -256,24 +339,99 @@ public final class CutsceneBackgrounds {
     }
 
     private static AnimatedBackdrop proceduralResolve() {
+        return swirlingBackdrop(new Color(18, 38, 58), new Color(36, 88, 132),
+                new Color(120, 220, 255), 0.012, Math.PI / 6.0, 0.58);
+    }
+
+    private static AnimatedBackdrop proceduralCatacombs() {
+        return swirlingBackdrop(new Color(12, 26, 20), new Color(28, 68, 36),
+                new Color(120, 210, 150), 0.010, Math.PI / 7.0, 0.64);
+    }
+
+    private static AnimatedBackdrop proceduralShroud() {
+        return swirlingBackdrop(new Color(8, 12, 28), new Color(32, 40, 74),
+                new Color(150, 140, 240), 0.011, Math.PI / 5.5, 0.60);
+    }
+
+    private static AnimatedBackdrop proceduralArcana() {
+        return swirlingBackdrop(new Color(22, 12, 36), new Color(48, 26, 78),
+                new Color(220, 160, 255), 0.013, Math.PI / 5.0, 0.62);
+    }
+
+    private static AnimatedBackdrop proceduralMirage() {
+        return swirlingBackdrop(new Color(8, 24, 34), new Color(22, 70, 88),
+                new Color(140, 240, 255), 0.012, Math.PI / 5.5, 0.60);
+    }
+
+    private static AnimatedBackdrop proceduralWildwood() {
+        return swirlingBackdrop(new Color(8, 26, 16), new Color(24, 70, 34),
+                new Color(150, 220, 140), 0.010, Math.PI / 6.0, 0.66);
+    }
+
+    private static AnimatedBackdrop proceduralFoundry() {
+        return forgeBackdrop(new Color(28, 10, 0), new Color(90, 30, 8),
+                new Color(255, 150, 60), new Color(255, 200, 120));
+    }
+
+    private static AnimatedBackdrop proceduralFoundrySteel() {
+        return forgeBackdrop(new Color(10, 18, 30), new Color(40, 60, 86),
+                new Color(160, 220, 255), new Color(190, 230, 255));
+    }
+
+    private static AnimatedBackdrop swirlingBackdrop(Color top, Color bottom, Color glow,
+                                                      double phaseSpeed, double offset, double radiusFactor) {
         return (g, w, h, tick) -> {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setPaint(new GradientPaint(0, 0, new Color(18, 38, 58), w, h, new Color(42, 92, 126)));
+            g.setPaint(new GradientPaint(0, 0, top, 0, h, bottom));
             g.fillRect(0, 0, w, h);
-            g.setComposite(AlphaComposite.SrcOver.derive(0.22f));
-            for (int i = 0; i < 12; i++) {
-                double angle = tick * 0.01 + i * Math.PI / 6.0;
-                int radius = Math.max(w, h);
-                int cx = (int) (w / 2 + Math.cos(angle) * w * 0.35);
-                int cy = (int) (h / 2 + Math.sin(angle * 1.1) * h * 0.25);
-                g.setPaint(new RadialGradientPaint(new Point2D.Float(cx, cy), radius / 2f,
-                        new float[]{0f, 1f},
-                        new Color[]{new Color(120, 220, 255, 90), new Color(0, 0, 0, 0)}));
-                g.fillOval(cx - radius / 2, cy - radius / 2, radius, radius);
+            g.setComposite(AlphaComposite.SrcOver.derive(0.28f));
+            int waves = 12;
+            for (int i = 0; i < waves; i++) {
+                double angle = tick * phaseSpeed + i * offset;
+                int radius = (int) Math.round(Math.max(80, Math.min(w, h) * radiusFactor));
+                int cx = (int) (w / 2 + Math.cos(angle) * w * 0.34);
+                int cy = (int) (h / 2 + Math.sin(angle * 0.85) * h * 0.28);
+                g.setPaint(new RadialGradientPaint(new Point2D.Float(cx, cy), (float) radius,
+                        new float[]{0f, 0.55f, 1f},
+                        new Color[]{new Color(glow.getRed(), glow.getGreen(), glow.getBlue(), 210),
+                                new Color(glow.getRed(), glow.getGreen(), glow.getBlue(), 80),
+                                new Color(0, 0, 0, 0)}));
+                g.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
             }
             g.setComposite(AlphaComposite.SrcOver);
-            g.setColor(new Color(255, 255, 255, 30));
-            g.drawLine(0, h - 60, w, h - 120);
+            g.setColor(new Color(glow.getRed(), glow.getGreen(), glow.getBlue(), 45));
+            g.setStroke(new BasicStroke(Math.max(2f, w / 480f)));
+            int baseline = (int) (h * 0.78 + Math.sin(tick * phaseSpeed * 0.6) * h * 0.05);
+            g.drawLine((int) (w * 0.1), baseline, (int) (w * 0.9), baseline - (int) (h * 0.04));
+        };
+    }
+
+    private static AnimatedBackdrop forgeBackdrop(Color top, Color bottom, Color spark, Color beam) {
+        return (g, w, h, tick) -> {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setPaint(new GradientPaint(0, 0, top, 0, h, bottom));
+            g.fillRect(0, 0, w, h);
+            g.setComposite(AlphaComposite.SrcOver.derive(0.35f));
+            int columns = Math.max(4, w / 240);
+            for (int column = 0; column < columns; column++) {
+                double progress = (tick * 0.035 + column * 0.2) % 1.0;
+                int cx = (int) (w * (column + 0.5) / columns);
+                int cy = (int) (h * (1.05 - progress));
+                int radius = Math.max(60, Math.min(w, h) / 5);
+                g.setPaint(new RadialGradientPaint(new Point2D.Float(cx, cy), (float) radius,
+                        new float[]{0f, 0.45f, 1f},
+                        new Color[]{new Color(spark.getRed(), spark.getGreen(), spark.getBlue(), 220),
+                                new Color(spark.getRed(), spark.getGreen(), spark.getBlue(), 90),
+                                new Color(0, 0, 0, 0)}));
+                g.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
+            }
+            g.setComposite(AlphaComposite.SrcOver);
+            g.setColor(new Color(beam.getRed(), beam.getGreen(), beam.getBlue(), 70));
+            int beams = 4;
+            for (int i = 0; i < beams; i++) {
+                int y = (int) (h * (0.2 + 0.15 * i) + Math.sin((tick + i * 20) * 0.05) * 18);
+                g.fillRect(0, Math.max(0, y - 5), w, 10);
+            }
         };
     }
 
@@ -288,12 +446,20 @@ public final class CutsceneBackgrounds {
     private static final class SequenceBackdrop implements AnimatedBackdrop {
         private final BufferedImage[] frames;
         private final int frameTicks;
+        private final Color overlayColor;
+        private final float overlayAlpha;
         private final Map<Integer, Map<Long, BufferedImage>> scaledCache = new ConcurrentHashMap<>();
 
         private SequenceBackdrop(BufferedImage[] rawFrames, int frameTicks) {
+            this(rawFrames, frameTicks, null, 0f);
+        }
+
+        private SequenceBackdrop(BufferedImage[] rawFrames, int frameTicks, Color overlay, float overlayAlpha) {
             BufferedImage[] normalised = AnimatedSprite.normaliseFrames(rawFrames);
             this.frames = normalised == null ? new BufferedImage[0] : normalised;
             this.frameTicks = Math.max(1, frameTicks);
+            this.overlayColor = overlay;
+            this.overlayAlpha = overlayAlpha;
         }
 
         @Override
@@ -310,6 +476,13 @@ public final class CutsceneBackgrounds {
             int drawX = (width - scaled.getWidth()) / 2;
             int drawY = (height - scaled.getHeight()) / 2;
             g.drawImage(scaled, drawX, drawY, null);
+            if (overlayColor != null && overlayAlpha > 0f) {
+                float alpha = Math.max(0f, Math.min(1f, overlayAlpha));
+                g.setComposite(AlphaComposite.SrcOver.derive(alpha));
+                Color tint = new Color(overlayColor.getRed(), overlayColor.getGreen(), overlayColor.getBlue());
+                g.setColor(tint);
+                g.fillRect(0, 0, width, height);
+            }
             g.setComposite(AlphaComposite.SrcOver.derive(0.18f));
             g.setColor(new Color(0, 0, 0, 200));
             g.fillRect(0, 0, width, height);
