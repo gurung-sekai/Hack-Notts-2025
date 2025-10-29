@@ -88,8 +88,7 @@ public final class CutsceneBackgrounds {
      */
     public static AnimatedBackdrop shopInterior() {
         return cachedSequence("shopInterior", CutsceneBackgrounds::proceduralShop, 5,
-                "/resources/cutscenes/shop_background.png",
-                "/resources/cutscenes/shop",
+                "/resources/Cutscene/Shop",
                 "/resources/Shop/backgrounds",
                 "/resources/Shop");
     }

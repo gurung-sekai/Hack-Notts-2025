@@ -39,8 +39,10 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+import java.awt.geom.RoundRectangle2D;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -356,12 +358,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private int statusTicks = 0;
     private volatile boolean inBoss = false;
     private boolean paused;
+    private boolean overlayActive;
     private Dimension renderSize;
     private double scaleX = 1.0;
     private double scaleY = 1.0;
-    private Point shopRoom;
-    private Dir shopDoorFacing;
-    private boolean shopInitialized = false;
+    private final ShopManager shopManager = new ShopManager();
     private boolean suppressNextMovementPress = false;
     private long suppressMovementDeadlineNanos = 0L;
     private boolean introShown = false;
@@ -439,9 +440,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         statusTicks = 0;
         inBoss = false;
         paused = false;
-        shopRoom = null;
-        shopDoorFacing = null;
-        shopInitialized = false;
+        shopManager.reset();
         goldenKnightIntroShown = false;
         queenRescued = false;
         finaleShown = false;
@@ -452,7 +451,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         spawnEnemiesIfNeeded(worldPos, room);
         placePlayerAtCenter();
         visited.add(new Point(worldPos));
-        ensureShopDoor(room, worldPos);
+        shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
         showMessage(texts.text("intro"));
         persistProgressAsync("initial run");
         SwingUtilities.invokeLater(this::playPrologueIfNeeded);
@@ -497,9 +496,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         animTick = snapshot.animTick();
         mouseX = snapshot.mouseX();
         mouseY = snapshot.mouseY();
-        shopRoom = snapshot.shopRoom();
-        shopDoorFacing = snapshot.shopDoorFacing();
-        shopInitialized = snapshot.shopInitialized();
+        shopManager.restore(snapshot.shopRoom(), snapshot.shopDoorFacing(), snapshot.shopInitialized());
         goldenKnightIntroShown = snapshot.goldenKnightIntroShown();
         queenRescued = snapshot.queenRescued();
         finaleShown = snapshot.finaleShown();
@@ -507,15 +504,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         rng = snapshot.rng();
         secureRandom = snapshot.secureRandom();
         paused = false;
-        if (shopInitialized && shopRoom != null) {
-            Room shop = world.get(shopRoom);
-            if (shop != null) {
-                shop.shopDoor = shopDoorFacing;
-                carveDoorOnGrid(shop, shopDoorFacing);
+        if (shopManager.initialized()) {
+            Point shopLocation = shopManager.location();
+            if (shopLocation != null) {
+                Room shop = world.get(shopLocation);
+                if (shop != null) {
+                    shopManager.ensureDoorway(shop, shopLocation, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
+                }
             }
-        }
-        if (!shopInitialized) {
-            ensureShopDoor(room, worldPos);
+        } else {
+            shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
         }
         if (!introShown) {
             SwingUtilities.invokeLater(this::playPrologueIfNeeded);
@@ -1161,54 +1159,6 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         r.cachedTextureEpoch = -1;
     }
 
-    private void ensureShopDoor(Room candidate, Point location) {
-        if (shopInitialized) {
-            return;
-        }
-        Room target = candidate == null ? room : candidate;
-        Point anchor = location == null ? worldPos : location;
-        if (target == null || anchor == null) {
-            return;
-        }
-        if (target.shopDoor != null) {
-            shopRoom = new Point(anchor);
-            shopDoorFacing = target.shopDoor;
-            shopInitialized = true;
-            return;
-        }
-        Dir door = selectShopDoor(target, anchor);
-        target.shopDoor = door;
-        shopRoom = new Point(anchor);
-        shopDoorFacing = door;
-        if (target.doors != null && !target.doors.contains(door)) {
-            target.doors.add(door);
-        }
-        carveDoorOnGrid(target, door);
-        if (target.lockedDoors != null) {
-            target.lockedDoors.remove(door);
-        }
-        markRoomDirty(target);
-        shopInitialized = true;
-    }
-
-    private Dir selectShopDoor(Room target, Point location) {
-        EnumSet<Dir> pool = EnumSet.allOf(Dir.class);
-        if (target.doors != null) {
-            pool.removeAll(target.doors);
-        }
-        for (Dir d : pool) {
-            if (!hasRoomAt(step(location, d))) {
-                return d;
-            }
-        }
-        for (Dir d : Dir.values()) {
-            if (!hasRoomAt(step(location, d))) {
-                return d;
-            }
-        }
-        return Dir.N;
-    }
-
     private boolean hasRoomAt(Point p) {
         return p != null && world != null && world.containsKey(p);
     }
@@ -1233,11 +1183,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void pauseForOverlay(Runnable runnable) {
         boolean previousPaused = paused;
+        boolean previousOverlay = overlayActive;
+        overlayActive = true;
         paused = true;
+        clearMovementInput();
         timer.stop();
         try {
             runnable.run();
         } finally {
+            overlayActive = previousOverlay;
             paused = previousPaused;
             if (!timer.isRunning()) {
                 timer.start();
@@ -2327,16 +2281,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             keysHeld = 0;
             statusMessage = "";
             statusTicks = 0;
-            shopRoom = null;
-            shopDoorFacing = null;
-            shopInitialized = false;
+            shopManager.reset();
             initializeBossPool();
             worldPos = new Point(0, 0);
             room = makeOrGetRoom(worldPos, null);
             spawnEnemiesIfNeeded(worldPos, room);
             visited.add(new Point(worldPos));
             placePlayerAtCenter();
-            ensureShopDoor(room, worldPos);
+            shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
             showMessage(texts.text("respawn"));
             repaint();
             requestFocusInWindow();
@@ -4150,6 +4102,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             if (tile == null) {
                 continue;
             }
+            boolean isShopDoor = dir == room.shopDoor;
             int px = tile.x * TILE;
             int py = tile.y * TILE;
             AffineTransform original = gg.getTransform();
@@ -4171,6 +4124,85 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
             gg.drawImage(frame, -frame.getWidth() / 2, -frame.getHeight() / 2, null);
             gg.setTransform(original);
+            if (isShopDoor) {
+                drawShopDoorHighlight(gg, dir, px, py, frame);
+            }
+        }
+    }
+
+    private void drawShopDoorHighlight(Graphics2D gg, Dir dir, int px, int py, BufferedImage frame) {
+        if (gg == null || dir == null) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) gg.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int doorWidth = frame != null ? frame.getWidth() : TILE;
+            int doorHeight = frame != null ? frame.getHeight() : TILE;
+            int centerX = px + TILE / 2;
+            int centerY = py + TILE / 2;
+            double rotation = switch (dir) {
+                case N -> Math.PI;
+                case S -> 0;
+                case W -> Math.PI / 2.0;
+                case E -> -Math.PI / 2.0;
+            };
+            g2.translate(centerX, centerY);
+            g2.rotate(rotation);
+
+            double glowWidth = doorWidth + 28;
+            double glowHeight = doorHeight + 44;
+            RoundRectangle2D halo = new RoundRectangle2D.Double(
+                    -glowWidth / 2.0,
+                    -glowHeight / 2.0,
+                    glowWidth,
+                    glowHeight,
+                    18,
+                    18);
+
+            float pulse = (float) (0.6 + 0.4 * Math.sin(animTick / 10.0));
+            g2.setPaint(new RadialGradientPaint(
+                    new Point2D.Float(0f, (float) (-doorHeight / 3.0)),
+                    (float) (glowWidth / 1.4),
+                    new float[]{0f, 0.5f, 1f},
+                    new Color[]{
+                            new Color(255, 214, 120, (int) Math.round(140 + pulse * 70)),
+                            new Color(255, 214, 120, 40),
+                            new Color(255, 214, 120, 0)
+                    }
+            ));
+            g2.fill(halo);
+            g2.setStroke(new BasicStroke(2.2f));
+            g2.setColor(new Color(120, 72, 18, 210));
+            g2.draw(halo);
+
+            Font previous = g2.getFont();
+            g2.setFont(DialogueText.font(Math.max(16f, Math.min(24f, doorWidth / 1.6f))));
+            FontMetrics metrics = g2.getFontMetrics();
+            String label = "SHOP";
+            int textWidth = metrics.stringWidth(label);
+            int baseline = (int) Math.round(-doorHeight / 2.0 - 6);
+            g2.setColor(new Color(40, 22, 6, 245));
+            g2.drawString(label, -textWidth / 2f, baseline);
+            g2.setFont(previous);
+
+            Ellipse2D floorGlow = new Ellipse2D.Double(
+                    -doorWidth * 0.9,
+                    doorHeight / 2.0 - 8,
+                    doorWidth * 1.8,
+                    24);
+            g2.setPaint(new RadialGradientPaint(
+                    new Point2D.Float(0f, (float) (doorHeight / 2.0)),
+                    (float) (doorWidth),
+                    new float[]{0f, 1f},
+                    new Color[]{
+                            new Color(255, 214, 120, 150),
+                            new Color(255, 214, 120, 0)
+                    }
+            ));
+            g2.fill(floorGlow);
+        } finally {
+            g2.dispose();
         }
     }
 
@@ -4216,6 +4248,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     @Override
     public void keyPressed(KeyEvent e) {
+        if (overlayActive) {
+            return;
+        }
         boolean blockMovement = false;
         if (suppressNextMovementPress) {
             long now = System.nanoTime();
@@ -4252,6 +4287,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     @Override
     public void keyReleased(KeyEvent e) {
+        if (overlayActive) {
+            return;
+        }
         if (matches(e, ControlAction.MOVE_UP)) up = false;
         if (matches(e, ControlAction.MOVE_DOWN)) down = false;
         if (matches(e, ControlAction.MOVE_LEFT)) left = false;
@@ -4344,9 +4382,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 animTick,
                 mouseX,
                 mouseY,
-                shopRoom,
-                shopDoorFacing,
-                shopInitialized,
+                shopManager.location(),
+                shopManager.doorFacing(),
+                shopManager.initialized(),
                 introShown,
                 goldenKnightIntroShown,
                 queenRescued,
