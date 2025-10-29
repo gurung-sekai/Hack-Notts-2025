@@ -6,6 +6,8 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.font.TextLayout;
 import java.awt.image.BufferedImage;
 import java.util.List;
@@ -17,13 +19,34 @@ public final class CutsceneDialog extends JDialog {
 
     private CutsceneDialog(Window owner, CutsceneScript script) {
         super(owner, "Cutscene", ModalityType.APPLICATION_MODAL);
-        CutscenePanel panel = new CutscenePanel(script);
+        Rectangle bounds = preferredBounds(owner);
+        CutscenePanel panel = new CutscenePanel(script, bounds.getSize());
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         setUndecorated(true);
         setBackground(new Color(0, 0, 0, 0));
         setContentPane(panel);
         pack();
-        setLocationRelativeTo(owner);
+        setBounds(bounds);
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowOpened(WindowEvent e) {
+                panel.requestFocusInWindow();
+            }
+        });
+    }
+
+    private static Rectangle preferredBounds(Window owner) {
+        GraphicsConfiguration configuration = owner == null
+                ? GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration()
+                : owner.getGraphicsConfiguration();
+        Rectangle screenBounds = configuration.getBounds();
+        Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
+        int width = Math.max(800, screenBounds.width - insets.left - insets.right);
+        int height = Math.max(600, screenBounds.height - insets.top - insets.bottom);
+        return new Rectangle(screenBounds.x + insets.left,
+                screenBounds.y + insets.top,
+                width,
+                height);
     }
 
     public static void play(Window owner, CutsceneScript script) {
@@ -42,9 +65,11 @@ public final class CutsceneDialog extends JDialog {
         private long tick = 0;
         private boolean fastForward;
 
-        private CutscenePanel(CutsceneScript script) {
+        private CutscenePanel(CutsceneScript script, Dimension preferredSize) {
             this.slides = script.slides();
-            setPreferredSize(new Dimension(720, 420));
+            setPreferredSize(preferredSize);
+            setMinimumSize(preferredSize);
+            setMaximumSize(preferredSize);
             setOpaque(false);
             setFocusable(true);
 
@@ -118,47 +143,58 @@ public final class CutsceneDialog extends JDialog {
                 AnimatedBackdrop backdrop = slide.backdrop() == null ? CutsceneBackgrounds.emberSwirl() : slide.backdrop();
                 backdrop.paint(g2, getWidth(), getHeight(), tick);
 
-                drawPortrait(g2, slide.portrait());
-                drawTextBox(g2, slide);
+                int textBoxMargin = Math.max(32, (int) (getHeight() * 0.04));
+                int textBoxHeight = drawTextBox(g2, slide, textBoxMargin);
+                drawPortrait(g2, slide.portrait(), textBoxHeight, textBoxMargin);
             } finally {
                 g2.dispose();
             }
         }
 
-        private void drawPortrait(Graphics2D g2, CutscenePortrait portrait) {
+        private void drawPortrait(Graphics2D g2, CutscenePortrait portrait, int textBoxHeight, int textBoxMargin) {
             BufferedImage img = portrait == null ? null : portrait.image();
             if (img == null) {
                 return;
             }
-            int size = Math.min(img.getWidth(), img.getHeight());
-            int drawWidth = size;
-            int drawHeight = size;
-            int x = 32;
-            int y = getHeight() - drawHeight - 120;
+            double maxPortraitWidth = getWidth() * 0.32;
+            double maxPortraitHeight = getHeight() - (textBoxHeight + textBoxMargin * 3);
+            maxPortraitHeight = Math.max(maxPortraitHeight, getHeight() * 0.4);
+            double scale = Math.min(maxPortraitWidth / img.getWidth(), maxPortraitHeight / img.getHeight());
+            scale = Math.max(scale, 0.2);
+            int drawWidth = (int) Math.round(img.getWidth() * scale);
+            int drawHeight = (int) Math.round(img.getHeight() * scale);
+            int x = textBoxMargin;
+            int y = getHeight() - textBoxHeight - textBoxMargin * 2 - drawHeight;
             g2.setComposite(AlphaComposite.SrcOver.derive(0.9f));
             g2.drawImage(img, x, y, drawWidth, drawHeight, null);
             g2.setComposite(AlphaComposite.SrcOver);
         }
 
-        private void drawTextBox(Graphics2D g2, CutsceneSlide slide) {
-            int boxHeight = 150;
-            int boxY = getHeight() - boxHeight - 24;
-            g2.setColor(new Color(12, 16, 28, 210));
-            g2.fillRoundRect(28, boxY, getWidth() - 56, boxHeight, 28, 28);
-            g2.setColor(new Color(255, 236, 190, 200));
-            g2.setStroke(new BasicStroke(2f));
-            g2.drawRoundRect(28, boxY, getWidth() - 56, boxHeight, 28, 28);
+        private int drawTextBox(Graphics2D g2, CutsceneSlide slide, int margin) {
+            int boxWidth = getWidth() - margin * 2;
+            int boxHeight = Math.max((int) (getHeight() * 0.26), 200);
+            int boxY = getHeight() - boxHeight - margin;
+            g2.setColor(new Color(12, 16, 28, 220));
+            g2.fillRoundRect(margin, boxY, boxWidth, boxHeight, margin, margin);
+            g2.setColor(new Color(255, 236, 190, 210));
+            g2.setStroke(new BasicStroke(Math.max(2f, margin / 12f)));
+            g2.drawRoundRect(margin, boxY, boxWidth, boxHeight, margin, margin);
 
             g2.setColor(new Color(255, 240, 210));
-            Font nameFont = g2.getFont().deriveFont(Font.BOLD, 20f);
-            Font textFont = g2.getFont().deriveFont(18f);
+            float nameSize = Math.max(28f, getHeight() * 0.045f);
+            float textSize = Math.max(24f, getHeight() * 0.035f);
+            Font nameFont = g2.getFont().deriveFont(Font.BOLD, nameSize);
+            Font textFont = g2.getFont().deriveFont(textSize);
             g2.setFont(nameFont);
             String speaker = slide.speaker() == null ? "" : slide.speaker();
-            g2.drawString(speaker, 48, boxY + 36);
+            int speakerBaseline = boxY + (int) (margin * 1.2 + nameSize);
+            g2.drawString(speaker, margin * 2, speakerBaseline);
 
             g2.setFont(textFont);
             String text = currentText().substring(0, Math.min(charsVisible, currentText().length()));
-            drawWrappedText(g2, text, 48, boxY + 64, getWidth() - 96);
+            int textTop = speakerBaseline + (int) (margin * 0.8);
+            drawWrappedText(g2, text, margin * 2, textTop, boxWidth - margin * 2);
+            return boxHeight;
         }
 
         private void drawWrappedText(Graphics2D g2, String text, int x, int y, int width) {

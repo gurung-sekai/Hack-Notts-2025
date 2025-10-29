@@ -297,6 +297,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
         clone.lockedDoors = room.lockedDoors.clone();
         clone.cleared = room.cleared;
         clone.spawnsPrepared = room.spawnsPrepared;
+        clone.trapSpawns = copyTraps(room.trapSpawns);
+        clone.trapsPrepared = room.trapsPrepared;
+        clone.trapSeed = room.trapSeed;
+        clone.trapManager = null;
         clone.floorThemeSeed = room.floorThemeSeed;
         clone.wallThemeSeed = room.wallThemeSeed;
         clone.paletteIndex = room.paletteIndex;
@@ -404,6 +408,31 @@ public final class DungeonRoomsSnapshot implements Serializable {
             c.value = coin.value;
             c.animTick = coin.animTick;
             list.add(c);
+        }
+        return list;
+    }
+
+    private static List<DungeonRooms.RoomTrap> copyTraps(List<DungeonRooms.RoomTrap> traps) {
+        List<DungeonRooms.RoomTrap> list = new ArrayList<>();
+        if (traps == null) {
+            return list;
+        }
+        for (DungeonRooms.RoomTrap trap : traps) {
+            DungeonRooms.RoomTrap t = new DungeonRooms.RoomTrap();
+            t.kind = trap.kind;
+            t.x = trap.x;
+            t.y = trap.y;
+            t.width = trap.width;
+            t.height = trap.height;
+            t.animationFolder = trap.animationFolder;
+            t.frameDuration = trap.frameDuration;
+            t.cycleSeconds = trap.cycleSeconds;
+            t.activeFraction = trap.activeFraction;
+            t.burstEvery = trap.burstEvery;
+            t.burstDuration = trap.burstDuration;
+            t.damageOverride = trap.damageOverride;
+            t.contactCooldownOverride = trap.contactCooldownOverride;
+            list.add(t);
         }
         return list;
     }
