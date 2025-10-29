@@ -7,6 +7,15 @@ import World.cutscene.CutsceneDialog;
 import World.cutscene.CutsceneLibrary;
 import World.cutscene.CutsceneScript;
 import World.cutscene.ShopDialog;
+import World.trap.Animation;
+import World.trap.BaseTrap;
+import World.trap.FireVentTrap;
+import World.trap.Player;
+import World.trap.SawTrap;
+import World.trap.SpikeTrap;
+import World.trap.SpriteLoader;
+import World.trap.Trap;
+import World.trap.TrapManager;
 import World.gfx.CharacterSkinLibrary;
 import World.gfx.DungeonTextures;
 import gfx.HiDpiScaler;
@@ -107,6 +116,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     enum WeaponType { CLAWS, SWORD, HAMMER, BOW, STAFF }
 
     enum ProjectileKind { ORB, ARROW }
+
+    enum TrapKind { SAW, SPIKE, FIRE_VENT }
 
     private enum MinimapRoomKind { CURRENT, BOSS_ACTIVE, BOSS_DEFEATED, SHOP, VISITED, ACCESSIBLE, LOCKED, UNKNOWN }
 
@@ -220,6 +231,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         EnumSet<Dir> lockedDoors = EnumSet.noneOf(Dir.class);
         boolean cleared = false;
         boolean spawnsPrepared = false;
+        List<RoomTrap> trapSpawns = new ArrayList<>();
+        boolean trapsPrepared = false;
+        int trapSeed = 0;
+        transient TrapManager trapManager;
         int floorThemeSeed = 0;
         int wallThemeSeed = 0;
         int paletteIndex = -1;
@@ -233,6 +248,77 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             for (int x = 0; x < COLS; x++)
                 for (int y = 0; y < ROWS; y++)
                     g[x][y] = T.VOID;
+        }
+    }
+
+    static class RoomTrap implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        TrapKind kind = TrapKind.SAW;
+        int x;
+        int y;
+        int width = TILE;
+        int height = TILE;
+        String animationFolder;
+        double frameDuration = 0.08;
+        double cycleSeconds = 2.0;
+        double activeFraction = 0.5;
+        double burstEvery = 3.0;
+        double burstDuration = 1.0;
+        int damageOverride = 0;
+        double contactCooldownOverride = -1.0;
+    }
+
+    private final class TrapAwarePlayer implements Player {
+        private final Rectangle bounds = new Rectangle();
+        private double extraInvulnerability = 0.0;
+
+        void syncFromDungeon() {
+            if (player != null) {
+                bounds.setBounds(player);
+            } else {
+                bounds.setBounds(0, 0, 0, 0);
+            }
+        }
+
+        void reset() {
+            extraInvulnerability = 0.0;
+            syncFromDungeon();
+        }
+
+        @Override
+        public Rectangle getBounds() {
+            return new Rectangle(bounds);
+        }
+
+        @Override
+        public boolean isInvulnerable() {
+            return extraInvulnerability > 0.0 || iFrames > 0;
+        }
+
+        @Override
+        public void grantInvulnerability(double seconds) {
+            if (!Double.isFinite(seconds) || seconds <= 0) {
+                return;
+            }
+            extraInvulnerability = Math.max(extraInvulnerability, seconds);
+            int frames = (int) Math.ceil(seconds / tickSeconds());
+            iFrames = Math.max(iFrames, frames);
+        }
+
+        @Override
+        public void takeDamage(int damage) {
+            if (damage <= 0) {
+                return;
+            }
+            applyPlayerDamage(damage);
+        }
+
+        @Override
+        public void update(double dt) {
+            if (extraInvulnerability > 0.0 && Double.isFinite(dt) && dt > 0.0) {
+                extraInvulnerability = Math.max(0.0, extraInvulnerability - dt);
+            }
         }
     }
 
@@ -306,6 +392,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
     private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
     private static final String BOSS_IDLE_PREFIX = "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
+    private static final String SAW_TRAP_FOLDER = "resources/traps/Saw Trap/idle";
+    private static final String SPIKE_TRAP_FOLDER = "resources/traps/Spike Trap/cycle";
+    private static final String FIRE_TRAP_FOLDER = "resources/traps/Fire Trap/attack";
 
     private final GameSettings settings;
     private final ControlsProfile controls;
@@ -363,6 +452,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private double scaleX = 1.0;
     private double scaleY = 1.0;
     private final ShopManager shopManager = new ShopManager();
+    private Dir lastShopDoorway = null;
+    private boolean awaitingShopExitClear = false;
+    private final TrapAwarePlayer trapPlayer = new TrapAwarePlayer();
     private boolean suppressNextMovementPress = false;
     private long suppressMovementDeadlineNanos = 0L;
     private boolean introShown = false;
@@ -448,8 +540,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         refreshArtAssets();
         initializeBossPool();
         room = makeOrGetRoom(worldPos, null);
+        ensureTrapLayoutForRoom(worldPos, room);
         spawnEnemiesIfNeeded(worldPos, room);
         placePlayerAtCenter();
+        trapPlayer.reset();
         visited.add(new Point(worldPos));
         shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
         showMessage(texts.text("intro"));
@@ -473,6 +567,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         ensureRoomTheme(room);
         normalizeEnemyState(room);
+        ensureTrapLayoutForRoom(worldPos, room);
+        trapPlayer.reset();
         up = snapshot.moveUp();
         down = snapshot.moveDown();
         left = snapshot.moveLeft();
@@ -992,6 +1088,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             world.put(new Point(pos), r); // store a copy of key to avoid mutation issues
             ensureRoomTheme(r);
             normalizeEnemyState(r);
+            ensureTrapLayoutForRoom(pos, r);
             return r;
         }
         // Ensure the entrance exists if we’re entering from a new side later
@@ -1004,6 +1101,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         ensureRoomTheme(r);
         normalizeEnemyState(r);
+        ensureTrapLayoutForRoom(pos, r);
         return r;
     }
 
@@ -1141,6 +1239,240 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
+    private TrapManager trapManagerForRoom(Room target) {
+        if (target == null) {
+            return null;
+        }
+        if (target.trapSpawns == null) {
+            target.trapSpawns = new ArrayList<>();
+        }
+        if (target.trapManager == null) {
+            target.trapManager = buildTrapManager(target.trapSpawns);
+        }
+        return target.trapManager;
+    }
+
+    private void ensureTrapLayoutForRoom(Point pos, Room room) {
+        if (room == null) {
+            return;
+        }
+        if (room.trapSpawns == null) {
+            room.trapSpawns = new ArrayList<>();
+        }
+        if (room.trapSeed == 0) {
+            room.trapSeed = secureRandom.nextInt(100_000);
+        }
+        Point anchor = pos == null ? worldPos : pos;
+        if (!room.trapsPrepared) {
+            Random trapRandom = new Random(room.trapSeed ^ (anchor == null ? 0 : anchor.hashCode()));
+            populateTrapSpawns(room, anchor, trapRandom);
+            room.trapsPrepared = true;
+        }
+        removeDoorConflicts(room);
+        if (room.trapManager == null) {
+            room.trapManager = buildTrapManager(room.trapSpawns);
+        }
+    }
+
+    private TrapManager buildTrapManager(List<RoomTrap> definitions) {
+        if (definitions == null || definitions.isEmpty()) {
+            return null;
+        }
+        TrapManager manager = new TrapManager();
+        boolean any = false;
+        for (RoomTrap def : definitions) {
+            Trap trap = instantiateTrap(def);
+            if (trap != null) {
+                manager.add(trap);
+                any = true;
+            }
+        }
+        return any ? manager : null;
+    }
+
+    private Trap instantiateTrap(RoomTrap def) {
+        if (def == null || def.kind == null) {
+            return null;
+        }
+        String folder = def.animationFolder == null || def.animationFolder.isBlank()
+                ? defaultTrapFolder(def.kind)
+                : def.animationFolder;
+        double frameDuration = def.frameDuration > 0 ? def.frameDuration : defaultFrameDuration(def.kind);
+        Animation animation = new Animation(SpriteLoader.loadDefault(folder), frameDuration);
+        BaseTrap trap;
+        switch (def.kind) {
+            case SAW -> trap = new SawTrap(def.x, def.y, animation);
+            case SPIKE -> trap = new SpikeTrap(def.x, def.y, animation, def.cycleSeconds, def.activeFraction);
+            case FIRE_VENT -> trap = new FireVentTrap(def.x, def.y, animation, def.burstEvery, def.burstDuration);
+            default -> trap = null;
+        }
+        if (trap == null) {
+            return null;
+        }
+        if (def.width > 0 || def.height > 0) {
+            trap.setDimensions(def.width, def.height);
+        }
+        if (def.damageOverride > 0) {
+            trap.setDamage(def.damageOverride);
+        }
+        if (def.contactCooldownOverride >= 0.0) {
+            trap.setContactCooldown(def.contactCooldownOverride);
+        }
+        return trap;
+    }
+
+    private String defaultTrapFolder(TrapKind kind) {
+        return switch (kind) {
+            case SAW -> SAW_TRAP_FOLDER;
+            case SPIKE -> SPIKE_TRAP_FOLDER;
+            case FIRE_VENT -> FIRE_TRAP_FOLDER;
+        };
+    }
+
+    private double defaultFrameDuration(TrapKind kind) {
+        return switch (kind) {
+            case SAW -> 0.06;
+            case SPIKE -> 0.08;
+            case FIRE_VENT -> 0.07;
+        };
+    }
+
+    private void configureTrapDefaults(RoomTrap trap, Random random) {
+        if (trap == null) {
+            return;
+        }
+        Random rngLocal = random == null ? new Random() : random;
+        switch (trap.kind) {
+            case SAW -> {
+                trap.animationFolder = SAW_TRAP_FOLDER;
+                trap.frameDuration = 0.06;
+                trap.damageOverride = Math.max(trap.damageOverride, 1);
+                trap.contactCooldownOverride = 0.35;
+            }
+            case SPIKE -> {
+                trap.animationFolder = SPIKE_TRAP_FOLDER;
+                trap.frameDuration = 0.08;
+                trap.cycleSeconds = Math.max(1.2, 1.8 + rngLocal.nextDouble() * 1.6);
+                trap.activeFraction = 0.45 + rngLocal.nextDouble() * 0.3;
+                trap.damageOverride = Math.max(trap.damageOverride, 2);
+                trap.contactCooldownOverride = 0.55;
+            }
+            case FIRE_VENT -> {
+                trap.animationFolder = FIRE_TRAP_FOLDER;
+                trap.frameDuration = 0.07;
+                trap.burstEvery = Math.max(2.0, 3.0 + rngLocal.nextDouble() * 2.5);
+                trap.burstDuration = Math.max(0.6, 0.9 + rngLocal.nextDouble() * 0.8);
+                trap.damageOverride = Math.max(trap.damageOverride, 3);
+                trap.contactCooldownOverride = 0.7;
+            }
+        }
+    }
+
+    private TrapKind chooseTrapKind(Random random, int depth) {
+        Random rngLocal = random == null ? new Random() : random;
+        if (depth < 4) {
+            return rngLocal.nextBoolean() ? TrapKind.SAW : TrapKind.SPIKE;
+        }
+        TrapKind[] pool = depth < 6 ? new TrapKind[]{TrapKind.SAW, TrapKind.SPIKE} : TrapKind.values();
+        return pool[rngLocal.nextInt(pool.length)];
+    }
+
+    private void populateTrapSpawns(Room room, Point pos, Random random) {
+        if (room == null) {
+            return;
+        }
+        if (room.trapSpawns == null) {
+            room.trapSpawns = new ArrayList<>();
+        }
+        if (isBossRoom(pos)) {
+            room.trapSpawns.clear();
+            return;
+        }
+        Random rngLocal = random == null ? new Random() : random;
+        int depth = pos == null ? 0 : Math.abs(pos.x) + Math.abs(pos.y);
+        if (depth < 3 && roomsVisited < 6) {
+            return;
+        }
+        int base = depth < 6 ? 1 : 2;
+        int variance = Math.max(1, depth / 3);
+        int target = Math.min(4, base + rngLocal.nextInt(Math.max(1, variance)));
+        int attempts = 0;
+        while (room.trapSpawns.size() < target && attempts++ < target * 40) {
+            int tx = 1 + rngLocal.nextInt(COLS - 2);
+            int ty = 1 + rngLocal.nextInt(ROWS - 2);
+            if (room.g[tx][ty] != T.FLOOR) continue;
+            if (nearAnyDoor(room, tx, ty, 2)) continue;
+            int px = tx * TILE + TILE / 2;
+            int py = ty * TILE + TILE / 2;
+            int half = TILE / 2;
+            if (!isRectFree(room, px, py, half)) continue;
+            Rectangle candidate = new Rectangle(px - half, py - half, TILE, TILE);
+            if (trapConflicts(room, candidate)) continue;
+            if (pickupConflict(room, candidate)) continue;
+
+            RoomTrap trap = new RoomTrap();
+            trap.kind = chooseTrapKind(rngLocal, depth);
+            trap.x = candidate.x;
+            trap.y = candidate.y;
+            trap.width = candidate.width;
+            trap.height = candidate.height;
+            configureTrapDefaults(trap, rngLocal);
+            room.trapSpawns.add(trap);
+        }
+    }
+
+    private boolean trapConflicts(Room room, Rectangle candidate) {
+        if (room == null || room.trapSpawns == null) {
+            return false;
+        }
+        for (RoomTrap existing : room.trapSpawns) {
+            Rectangle current = new Rectangle(existing.x, existing.y, existing.width, existing.height);
+            if (candidate.intersects(current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean pickupConflict(Room room, Rectangle candidate) {
+        if (room == null || candidate == null) {
+            return false;
+        }
+        if (room.keyPickups != null) {
+            for (KeyPickup key : room.keyPickups) {
+                Rectangle keyRect = new Rectangle(key.x - key.r, key.y - key.r, key.r * 2, key.r * 2);
+                if (candidate.intersects(keyRect)) {
+                    return true;
+                }
+            }
+        }
+        if (room.coinPickups != null) {
+            for (CoinPickup coin : room.coinPickups) {
+                Rectangle coinRect = new Rectangle(coin.x - coin.r, coin.y - coin.r, coin.r * 2, coin.r * 2);
+                if (candidate.intersects(coinRect)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void removeDoorConflicts(Room room) {
+        if (room == null || room.trapSpawns == null || room.trapSpawns.isEmpty()) {
+            return;
+        }
+        boolean removed = room.trapSpawns.removeIf(trap -> {
+            int cx = trap.x + trap.width / 2;
+            int cy = trap.y + trap.height / 2;
+            int tx = Math.max(0, Math.min(COLS - 1, cx / TILE));
+            int ty = Math.max(0, Math.min(ROWS - 1, cy / TILE));
+            return nearAnyDoor(room, tx, ty, 1);
+        });
+        if (removed) {
+            room.trapManager = null;
+        }
+    }
+
     private void markAllRoomsDirty() {
         if (world != null) {
             for (Room r : world.values()) {
@@ -1163,11 +1495,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return p != null && world != null && world.containsKey(p);
     }
 
-    private void openShop() {
+    private void openShop(Dir doorSide) {
         Room current = room;
         if (current != null) {
             current.shopVisited = true;
         }
+        lastShopDoorway = doorSide;
+        awaitingShopExitClear = true;
+        nudgePlayerAwayFromShopDoor(doorSide);
         pauseForOverlay(() -> {
             ShopDialog.Result result = ShopDialog.showShop(SwingUtilities.getWindowAncestor(DungeonRooms.this), coins, playerHP, MAX_PLAYER_HP);
             coins = Math.max(0, result.remainingCoins());
@@ -1179,6 +1514,24 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 showMessage("The shopkeeper bids you safe travels.");
             }
         });
+    }
+
+    private void nudgePlayerAwayFromShopDoor(Dir doorSide) {
+        if (doorSide == null || room == null || player == null) {
+            return;
+        }
+        Point tile = doorTile(doorSide);
+        int targetX = tile.x * TILE + TILE / 2;
+        int targetY = tile.y * TILE + TILE / 2;
+        switch (doorSide) {
+            case N -> targetY += TILE * 2;
+            case S -> targetY -= TILE * 2;
+            case W -> targetX += TILE * 2;
+            case E -> targetX -= TILE * 2;
+        }
+        Point safe = safePlayerSpawn(room, targetX, targetY);
+        player.setLocation(safe.x - PLAYER_SIZE / 2, safe.y - PLAYER_SIZE / 2);
+        trapPlayer.syncFromDungeon();
     }
 
     private void pauseForOverlay(Runnable runnable) {
@@ -2288,6 +2641,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             spawnEnemiesIfNeeded(worldPos, room);
             visited.add(new Point(worldPos));
             placePlayerAtCenter();
+            trapPlayer.reset();
             shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
             showMessage(texts.text("respawn"));
             repaint();
@@ -2453,6 +2807,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         if (inBounds(inside.x, inside.y)) r.g[inside.x][inside.y] = T.FLOOR;
         markRoomDirty(r);
+        removeDoorConflicts(r);
     }
 
     private boolean nearAnyDoor(Room r, int tx, int ty, int dist) {
@@ -2492,6 +2847,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         int cy = ROWS / 2 * TILE + TILE / 2;
         Point p = safePlayerSpawn(room, cx, cy);
         player = new Rectangle(p.x - PLAYER_SIZE / 2, p.y - PLAYER_SIZE / 2, PLAYER_SIZE, PLAYER_SIZE);
+        trapPlayer.syncFromDungeon();
         repaint();
     }
 
@@ -2508,6 +2864,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         Point p = safePlayerSpawn(room, px, py);
         player = new Rectangle(p.x - PLAYER_SIZE / 2, p.y - PLAYER_SIZE / 2, PLAYER_SIZE, PLAYER_SIZE);
+        trapPlayer.syncFromDungeon();
         repaint();
     }
 
@@ -2533,6 +2890,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return new Point(COLS / 2 * TILE + TILE / 2, ROWS / 2 * TILE + TILE / 2);
     }
 
+    private double tickSeconds() {
+        int refresh = settings == null ? FPS : Math.max(30, settings.refreshRate());
+        return 1.0 / refresh;
+    }
+
     @Override
     public void actionPerformed(ActionEvent e) {
         if (paused || inBoss) {
@@ -2542,6 +2904,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (iFrames > 0) iFrames--;
         if (healTicks > 0) healTicks--;
         updatePlayer();
+        updateTraps();
         updateCombat();
         checkKeyPickup();
         checkCoinPickup();
@@ -2570,6 +2933,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         Dir through = touchingDoorOnEdge();
         if (through != null) switchRoom(through);
+    }
+
+    private void updateTraps() {
+        TrapManager manager = trapManagerForRoom(room);
+        if (manager == null) {
+            return;
+        }
+        trapPlayer.syncFromDungeon();
+        manager.update(tickSeconds(), trapPlayer);
     }
 
     private void moveAxis(int dx, int dy) {
@@ -2619,33 +2991,84 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private Dir touchingDoorOnEdge() {
+        if (player == null || room == null) {
+            return null;
+        }
         int cx = player.x + player.width / 2;
         int cy = player.y + player.height / 2;
 
+        Dir candidate = null;
         if (cy < TILE / 3) {
             Point t = doorTile(Dir.N);
-            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cx - (t.x * TILE + TILE / 2)) < TILE / 2) return Dir.N;
-        }
-        if (cy > ROWS * TILE - TILE / 3) {
+            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cx - (t.x * TILE + TILE / 2)) < TILE / 2) {
+                candidate = Dir.N;
+            }
+        } else if (cy > ROWS * TILE - TILE / 3) {
             Point t = doorTile(Dir.S);
-            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cx - (t.x * TILE + TILE / 2)) < TILE / 2) return Dir.S;
-        }
-        if (cx < TILE / 3) {
+            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cx - (t.x * TILE + TILE / 2)) < TILE / 2) {
+                candidate = Dir.S;
+            }
+        } else if (cx < TILE / 3) {
             Point t = doorTile(Dir.W);
-            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cy - (t.y * TILE + TILE / 2)) < TILE / 2) return Dir.W;
-        }
-        if (cx > COLS * TILE - TILE / 3) {
+            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cy - (t.y * TILE + TILE / 2)) < TILE / 2) {
+                candidate = Dir.W;
+            }
+        } else if (cx > COLS * TILE - TILE / 3) {
             Point t = doorTile(Dir.E);
-            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cy - (t.y * TILE + TILE / 2)) < TILE / 2) return Dir.E;
+            if (room.g[t.x][t.y] == T.DOOR && Math.abs(cy - (t.y * TILE + TILE / 2)) < TILE / 2) {
+                candidate = Dir.E;
+            }
         }
-        return null;
+
+        if (candidate == null) {
+            if (awaitingShopExitClear && lastShopDoorway != null && playerClearedShopDoorway(lastShopDoorway)) {
+                awaitingShopExitClear = false;
+            }
+            return null;
+        }
+
+        if (room.shopDoor == candidate) {
+            if (awaitingShopExitClear) {
+                if (playerClearedShopDoorway(candidate)) {
+                    awaitingShopExitClear = false;
+                } else {
+                    return null;
+                }
+            }
+        } else {
+            awaitingShopExitClear = false;
+        }
+        return candidate;
+    }
+
+    private boolean playerClearedShopDoorway(Dir doorSide) {
+        if (doorSide == null || room == null || player == null) {
+            return true;
+        }
+        Point door = doorTile(doorSide);
+        if (door == null) {
+            return true;
+        }
+        int doorCenterX = door.x * TILE + TILE / 2;
+        int doorCenterY = door.y * TILE + TILE / 2;
+        int cx = player.x + player.width / 2;
+        int cy = player.y + player.height / 2;
+        int clearance = TILE;
+        return switch (doorSide) {
+            case N -> cy >= doorCenterY + clearance;
+            case S -> cy <= doorCenterY - clearance;
+            case W -> cx >= doorCenterX + clearance;
+            case E -> cx <= doorCenterX - clearance;
+        };
     }
 
     private void switchRoom(Dir exitSide) {
         if (room != null && room.shopDoor == exitSide) {
-            openShop();
+            openShop(exitSide);
             return;
         }
+        awaitingShopExitClear = false;
+        lastShopDoorway = null;
         boolean consumedKey = false;
         if (room.lockedDoors.contains(exitSide)) {
             if (keysHeld <= 0) {
@@ -2677,6 +3100,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         worldPos = nextPos;
         room = nextRoom;
+        ensureTrapLayoutForRoom(worldPos, room);
 
         // Track exploration
         boolean isNewVisit = registerVisit(worldPos);
@@ -2869,6 +3293,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         for (CoinPickup coin : room.coinPickups) {
             drawCoinPickup(gg, coin);
+        }
+
+        TrapManager traps = trapManagerForRoom(room);
+        if (traps != null) {
+            traps.render(gg);
         }
 
         for (RoomEnemy e : room.enemies) {
