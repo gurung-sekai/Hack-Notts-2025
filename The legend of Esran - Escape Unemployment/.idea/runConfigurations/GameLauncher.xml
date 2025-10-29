@@ -1,11 +1,8 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="GameLauncher" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="launcher.GameLauncher" />
-    <option name="VM_PARAMETERS" value="" />
-    <option name="PROGRAM_PARAMETERS" value="" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/The legend of Esran - Escape Unemployment" />
-    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
     <module name="The legend of Esran - Escape Unemployment" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
