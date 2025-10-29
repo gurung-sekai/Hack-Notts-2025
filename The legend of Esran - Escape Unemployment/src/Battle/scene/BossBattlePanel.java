@@ -76,8 +76,16 @@ public class BossBattlePanel extends JPanel {
     }
 
     public static BossBattlePanel create(BossKind kind, Consumer<Outcome> onEnd) {
+        return create(kind, null, onEnd);
+    }
+
+    public static BossBattlePanel create(BossKind kind, BattleTuning tuning, Consumer<Outcome> onEnd) {
         HeroDefinition hero = HeroDefinition.defaultHero();
         BossDefinition boss = BossDefinition.of(kind);
+        if (tuning != null) {
+            hero = hero.withTuning(tuning);
+            boss = boss.withTuning(tuning);
+        }
         return new BossBattlePanel(hero, boss, onEnd);
     }
 
@@ -1106,6 +1114,38 @@ public class BossBattlePanel extends JPanel {
     // ---------------------------------------------------------------------
     // Hero / Boss definitions
     // ---------------------------------------------------------------------
+    public record BattleTuning(Stats heroStats,
+                               double heroOffenseMod,
+                               double heroDefenseMod,
+                               int heroMomentum,
+                               double bossHealthMultiplier,
+                               double bossOffenseMultiplier,
+                               double bossDefenseMultiplier,
+                               int bossHealthBonus) {
+        public BattleTuning {
+            heroStats = heroStats == null ? new Stats(240, 28, 20, 18) : heroStats;
+            heroOffenseMod = sanitize(heroOffenseMod);
+            heroDefenseMod = sanitize(heroDefenseMod);
+            bossHealthMultiplier = sanitizeMultiplier(bossHealthMultiplier);
+            bossOffenseMultiplier = sanitizeMultiplier(bossOffenseMultiplier);
+            bossDefenseMultiplier = sanitizeMultiplier(bossDefenseMultiplier);
+        }
+
+        private static double sanitize(double value) {
+            if (!Double.isFinite(value) || value <= 0) {
+                return 1.0;
+            }
+            return value;
+        }
+
+        private static double sanitizeMultiplier(double value) {
+            if (!Double.isFinite(value) || value <= 0) {
+                return 1.0;
+            }
+            return value;
+        }
+    }
+
     private record HeroDefinition(String name, Affinity affinity, Stats stats, SpriteSource sprite,
                                   double offenseMod, double defenseMod, int openingMomentum) {
         Fighter toFighter() {
@@ -1115,6 +1155,17 @@ public class BossBattlePanel extends JPanel {
         static HeroDefinition defaultHero() {
             return new HeroDefinition("Sir Rowan", Affinity.EMBER, new Stats(240, 28, 20, 18),
                     prefixSource("/resources/sprites/Knight/Idle/knight_m_idle_anim_f"), 1.08, 1.18, 2);
+        }
+
+        HeroDefinition withTuning(BattleTuning tuning) {
+            if (tuning == null) {
+                return this;
+            }
+            Stats override = tuning.heroStats() == null ? stats.copy() : tuning.heroStats().copy();
+            double offense = tuning.heroOffenseMod() > 0 ? tuning.heroOffenseMod() : offenseMod;
+            double defense = tuning.heroDefenseMod() > 0 ? tuning.heroDefenseMod() : defenseMod;
+            int momentum = Math.max(-5, Math.min(5, tuning.heroMomentum()));
+            return new HeroDefinition(name, affinity, override, sprite, offense, defense, momentum);
         }
     }
 
@@ -1173,6 +1224,21 @@ public class BossBattlePanel extends JPanel {
                         new Stats(270, 24, 19, 14), directorySource("/resources/bosses/toxicTree"), 1.45,
                         Double.NaN, 1.06, 1.1, -1, bossAttackIds("toxicTree"));
             };
+        }
+
+        BossDefinition withTuning(BattleTuning tuning) {
+            if (tuning == null) {
+                return this;
+            }
+            Stats tuned = stats.copy();
+            double healthMultiplier = tuning.bossHealthMultiplier();
+            tuned.hp = (int) Math.max(40, Math.round(tuned.hp * healthMultiplier + tuning.bossHealthBonus()));
+            tuned.power = (int) Math.max(1, Math.round(tuned.power * tuning.bossOffenseMultiplier()));
+            tuned.guard = (int) Math.max(1, Math.round(tuned.guard * tuning.bossDefenseMultiplier()));
+            double tunedOffense = offenseMod * tuning.bossOffenseMultiplier();
+            double tunedDefense = defenseMod * tuning.bossDefenseMultiplier();
+            return new BossDefinition(displayName, affinity, tuned, sprite, scale, maxHeight,
+                    tunedOffense, tunedDefense, momentumEdge, attackIds);
         }
     }
 
