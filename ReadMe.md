@@ -18,6 +18,11 @@
 **The Legend of Aetheria** is a 2D dungeon crawler built entirely in **pure Java**, without any engines or frameworks.
 Each dungeon is procedurally generated with randomized obstacles, enemy placements, and door configurations — creating a fresh experience every time.
 
+## Development Documentation
+
+- [Legacy Maintenance Playbook](docs/LegacyMaintenancePlaybook.md) — structured guidance for tackling milestone-based upkeep, tagging releases, and keeping documentation consistent.
+- [Trap System Overview](docs/TrapSystem.md) — explains the reusable animation loader, trap APIs, and how to export compatible Aseprite sprites.
+
 > **Windows build note:** If you are working inside a OneDrive-synchronised folder, Gradle will automatically redirect its build output to `%LOCALAPPDATA%\HackNotts\legend-of-esran` to avoid the `Unable to delete directory … build/classes/java/main` error. You can override the location via the `legend.buildDir` Gradle property or the `GRADLE_BUILD_DIR` environment variable when needed.
 
 > **Boss sprite sequences:** Pre-sliced boss frames placed under `src/resources/bosses/<Name>/…` (or similar prefixed directories) are now detected automatically. The game will load those numbered PNGs directly and only fall back to runtime sheet slicing when no split frames are found.

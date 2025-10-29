@@ -294,12 +294,15 @@ public final class CutsceneLibrary {
 
     private static AnimatedBackdrop bossBackdrop(BossKind kind) {
         return switch (kind) {
-            case GOLLUM, GRIM -> CutsceneBackgrounds.dungeonCaptivity();
-            case FIRE_FLINGER, GOLDEN_KNIGHT -> CutsceneBackgrounds.goldenThrone();
-            case GOLD_MECH -> CutsceneBackgrounds.shopInterior();
-            case PURPLE_EMPRESS, THE_WELCH -> CutsceneBackgrounds.victoryCelebration();
-            case TOXIC_TREE -> CutsceneBackgrounds.heroResolve();
-            default -> CutsceneBackgrounds.emberSwirl();
+            case GOLLUM -> CutsceneBackgrounds.bossCatacombs();
+            case GRIM -> CutsceneBackgrounds.bossShroud();
+            case FIRE_FLINGER -> CutsceneBackgrounds.bossFoundry();
+            case GOLD_MECH -> CutsceneBackgrounds.bossFoundrySteel();
+            case PURPLE_EMPRESS -> CutsceneBackgrounds.bossArcana();
+            case THE_WELCH -> CutsceneBackgrounds.bossMirage();
+            case TOXIC_TREE -> CutsceneBackgrounds.bossWildwood();
+            case GOLDEN_KNIGHT -> CutsceneBackgrounds.goldenThrone();
+            default -> CutsceneBackgrounds.heroResolve();
         };
     }
 }
