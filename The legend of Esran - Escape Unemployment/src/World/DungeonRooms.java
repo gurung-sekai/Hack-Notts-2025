@@ -1521,15 +1521,34 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         Point tile = doorTile(doorSide);
-        int targetX = tile.x * TILE + TILE / 2;
-        int targetY = tile.y * TILE + TILE / 2;
+        int dx = 0;
+        int dy = 0;
         switch (doorSide) {
-            case N -> targetY += TILE * 2;
-            case S -> targetY -= TILE * 2;
-            case W -> targetX += TILE * 2;
-            case E -> targetX -= TILE * 2;
+            case N -> dy = 1;
+            case S -> dy = -1;
+            case W -> dx = 1;
+            case E -> dx = -1;
         }
-        Point safe = safePlayerSpawn(room, targetX, targetY);
+        int tx = tile.x;
+        int ty = tile.y;
+        Point target = null;
+        for (int step = 0; step < Math.max(COLS, ROWS); step++) {
+            tx += dx;
+            ty += dy;
+            if (!inBounds(tx, ty)) {
+                break;
+            }
+            if (room.g[tx][ty] == T.FLOOR) {
+                target = new Point(tx * TILE + TILE / 2, ty * TILE + TILE / 2);
+                break;
+            }
+        }
+        if (target == null) {
+            int fallbackX = tile.x * TILE + TILE / 2 + dx * TILE * 3;
+            int fallbackY = tile.y * TILE + TILE / 2 + dy * TILE * 3;
+            target = new Point(fallbackX, fallbackY);
+        }
+        Point safe = safePlayerSpawn(room, target.x, target.y);
         player.setLocation(safe.x - PLAYER_SIZE / 2, safe.y - PLAYER_SIZE / 2);
         trapPlayer.syncFromDungeon();
     }
