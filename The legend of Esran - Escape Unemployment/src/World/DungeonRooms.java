@@ -358,6 +358,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private int statusTicks = 0;
     private volatile boolean inBoss = false;
     private boolean paused;
+    private boolean overlayActive;
     private Dimension renderSize;
     private double scaleX = 1.0;
     private double scaleY = 1.0;
@@ -1182,11 +1183,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void pauseForOverlay(Runnable runnable) {
         boolean previousPaused = paused;
+        boolean previousOverlay = overlayActive;
+        overlayActive = true;
         paused = true;
+        clearMovementInput();
         timer.stop();
         try {
             runnable.run();
         } finally {
+            overlayActive = previousOverlay;
             paused = previousPaused;
             if (!timer.isRunning()) {
                 timer.start();
@@ -4243,6 +4248,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     @Override
     public void keyPressed(KeyEvent e) {
+        if (overlayActive) {
+            return;
+        }
         boolean blockMovement = false;
         if (suppressNextMovementPress) {
             long now = System.nanoTime();
@@ -4279,6 +4287,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     @Override
     public void keyReleased(KeyEvent e) {
+        if (overlayActive) {
+            return;
+        }
         if (matches(e, ControlAction.MOVE_UP)) up = false;
         if (matches(e, ControlAction.MOVE_DOWN)) down = false;
         if (matches(e, ControlAction.MOVE_LEFT)) left = false;
