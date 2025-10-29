@@ -1,5 +1,6 @@
 package World;
 
+import World.ui.UiPalette;
 import util.ResourceLoader;
 
 import java.awt.BasicStroke;
@@ -21,11 +22,7 @@ import java.io.InputStream;
 public final class DialogueText {
 
     private static final String FONT_RESOURCE = "resources/Font/ThaleahFat.ttf";
-    private static final Color TEXT_COLOR = new Color(250, 240, 220);
-    private static final Color FRAME_FILL = new Color(18, 18, 28, 230);
-    private static final Color FRAME_BORDER_OUTER = new Color(250, 248, 240, 235);
-    private static final Color FRAME_BORDER_INNER = new Color(0, 0, 0, 150);
-    private static final Stroke FRAME_STROKE = new BasicStroke(2.4f);
+    private static final Stroke FRAME_STROKE = new BasicStroke(2.6f);
 
     private static volatile Font baseFont;
     private static final Font FALLBACK_FONT = new Font(Font.MONOSPACED, Font.PLAIN, 18);
@@ -44,7 +41,7 @@ public final class DialogueText {
         }
         Font derived = font(size);
         g.setFont(derived);
-        g.setColor(TEXT_COLOR);
+        g.setColor(UiPalette.TEXT_PRIMARY);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
     }
 
@@ -60,16 +57,16 @@ public final class DialogueText {
         int width = Math.max(0, bounds.width);
         int height = Math.max(0, bounds.height);
 
-        g.setColor(FRAME_FILL);
+        g.setColor(UiPalette.FRAME_BACKGROUND);
         g.fillRoundRect(bounds.x, bounds.y, width, height, arcSize, arcSize);
 
-        g.setColor(FRAME_BORDER_OUTER);
+        g.setColor(UiPalette.FRAME_BORDER_OUTER);
         g.setStroke(FRAME_STROKE);
         g.drawRoundRect(bounds.x + 1, bounds.y + 1,
                 Math.max(0, width - 2), Math.max(0, height - 2),
                 Math.max(0, arcSize - 2), Math.max(0, arcSize - 2));
 
-        g.setColor(FRAME_BORDER_INNER);
+        g.setColor(UiPalette.FRAME_BORDER_INNER);
         g.drawRoundRect(bounds.x + 2, bounds.y + 2,
                 Math.max(0, width - 4), Math.max(0, height - 4),
                 Math.max(0, arcSize - 4), Math.max(0, arcSize - 4));
@@ -82,7 +79,7 @@ public final class DialogueText {
         if (g == null || text == null || text.isEmpty()) {
             return;
         }
-        g.drawString(text, x, y);
+        drawString(g, text, x, y, UiPalette.TEXT_PRIMARY);
     }
 
     public static int drawParagraph(Graphics2D g, String text, int x, int y, int width) {
@@ -98,22 +95,45 @@ public final class DialogueText {
         int lineHeight = metrics.getHeight();
         int baseline = y;
         boolean firstLine = true;
+        int bulletWidth = metrics.stringWidth("• ");
+        if (bulletWidth <= 0) {
+            bulletWidth = Math.max(metrics.charWidth(' ') * 2, metrics.getHeight() / 2);
+        }
 
         String remaining = text.trim();
         while (!remaining.isEmpty()) {
-            String prefix = firstLine ? "* " : "  ";
-            int available = Math.max(0, width - metrics.stringWidth(prefix));
+            int available = Math.max(0, width - bulletWidth);
 
             int breakPos = computeBreakPosition(metrics, remaining, available);
             String lineText = remaining.substring(0, breakPos).stripTrailing();
-            drawString(g, prefix + lineText, x, baseline);
-
+            boolean drew = false;
+            if (!lineText.isEmpty()) {
+                if (firstLine) {
+                    drawString(g, "•", x, baseline, UiPalette.TEXT_ACCENT);
+                }
+                drawString(g, lineText, x + bulletWidth, baseline, UiPalette.TEXT_PRIMARY);
+                drew = true;
+            }
             baseline += lineHeight;
-            firstLine = false;
+            if (drew) {
+                firstLine = false;
+            }
             remaining = remaining.substring(breakPos).stripLeading();
         }
 
         return baseline;
+    }
+
+    public static void drawString(Graphics2D g, String text, int x, int y, Color color) {
+        if (g == null || text == null || text.isEmpty()) {
+            return;
+        }
+        Color original = g.getColor();
+        g.setColor(UiPalette.TEXT_SHADOW);
+        g.drawString(text, x + 2, y + 2);
+        g.setColor(color == null ? UiPalette.TEXT_PRIMARY : color);
+        g.drawString(text, x, y);
+        g.setColor(original);
     }
 
     private static int computeBreakPosition(FontMetrics metrics, String text, int availableWidth) {

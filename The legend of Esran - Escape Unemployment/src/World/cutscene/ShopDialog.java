@@ -1,6 +1,8 @@
 package World.cutscene;
 
+import World.DialogueText;
 import World.UndertaleText;
+import World.ui.UiPalette;
 import gfx.HiDpiScaler;
 
 import javax.swing.*;
@@ -13,7 +15,6 @@ import java.awt.event.WindowEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.util.Locale;
-import java.util.Random;
 
 /**
  * Animated shop overlay that lets the player trade coins for healing items.
@@ -120,10 +121,10 @@ public final class ShopDialog extends JDialog {
 
             JPanel info = new JPanel(new GridLayout(1, 2, scaleToInt(32), 0));
             info.setOpaque(false);
-            coinsLabel.setForeground(new Color(255, 236, 160));
+            coinsLabel.setForeground(UiPalette.SHOP_COINS);
             coinsLabel.setFont(UndertaleText.font(scaledFont(22f)));
             coinsLabel.setHorizontalAlignment(SwingConstants.LEFT);
-            hpLabel.setForeground(new Color(200, 230, 255));
+            hpLabel.setForeground(UiPalette.SHOP_HP);
             hpLabel.setFont(UndertaleText.font(scaledFont(22f)));
             hpLabel.setHorizontalAlignment(SwingConstants.RIGHT);
             info.add(coinsLabel);
@@ -163,7 +164,7 @@ public final class ShopDialog extends JDialog {
 
             JLabel hint = new JLabel("Press ESC to leave the shop");
             hint.setOpaque(false);
-            hint.setForeground(new Color(210, 215, 240, 200));
+            hint.setForeground(UiPalette.SHOP_HINT);
             hint.setFont(UndertaleText.font(scaledFont(16f)));
             hint.setBorder(BorderFactory.createEmptyBorder(scaleToInt(12), 0, 0, 0));
             footer.add(hint, BorderLayout.WEST);
@@ -212,10 +213,10 @@ public final class ShopDialog extends JDialog {
                         Math.min(getWidth(), bounds.width + pad * 2),
                         Math.min(getHeight(), bounds.height + pad * 2));
                 g2.setComposite(AlphaComposite.SrcOver.derive(0.82f));
-                g2.setColor(new Color(8, 16, 26, 230));
+                g2.setColor(UiPalette.SHOP_PANEL_FILL);
                 g2.fillRoundRect(frame.x, frame.y, frame.width, frame.height, arc, arc);
                 g2.setComposite(AlphaComposite.SrcOver);
-                g2.setColor(new Color(255, 220, 150, 210));
+                g2.setColor(UiPalette.SHOP_PANEL_BORDER);
                 g2.setStroke(new BasicStroke(Math.max(3f, (float) scaleToInt(3))));
                 g2.drawRoundRect(frame.x, frame.y, frame.width, frame.height, arc, arc);
                 drawVignette(g2);
@@ -250,9 +251,9 @@ public final class ShopDialog extends JDialog {
             int w = getWidth();
             int h = getHeight();
             Paint old = g2.getPaint();
-            g2.setPaint(new GradientPaint(0, margin, new Color(0, 0, 0, 190), 0, h / 2f, new Color(0, 0, 0, 50)));
+            g2.setPaint(new GradientPaint(0, margin, UiPalette.SHOP_VIGNETTE_TOP, 0, h / 2f, UiPalette.SHOP_VIGNETTE_FADE));
             g2.fillRect(margin, margin, w - margin * 2, h / 2);
-            g2.setPaint(new GradientPaint(0, h - margin, new Color(0, 0, 0, 210), 0, h / 2f, new Color(0, 0, 0, 30)));
+            g2.setPaint(new GradientPaint(0, h - margin, UiPalette.SHOP_VIGNETTE_BOTTOM, 0, h / 2f, UiPalette.SHOP_VIGNETTE_FADE));
             g2.fillRect(margin, h / 2, w - margin * 2, h / 2 - margin);
             g2.setPaint(old);
         }
@@ -298,7 +299,7 @@ public final class ShopDialog extends JDialog {
         button.setOpaque(false);
         button.setRolloverEnabled(true);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        button.setForeground(new Color(250, 240, 220));
+        button.setForeground(UiPalette.TEXT_PRIMARY);
         button.setFont(UndertaleText.font(fontSize));
         int pad = scaleToInt(10);
         button.setBorder(BorderFactory.createEmptyBorder(pad, pad * 2, pad, pad * 2));
@@ -454,7 +455,7 @@ public final class ShopDialog extends JDialog {
                     int cursorSize = scaleToInt(10);
                     int cursorX = bounds.x + bounds.width - scaleToInt(28);
                     int cursorY = bounds.y + bounds.height - scaleToInt(18);
-                    g2.setColor(new Color(255, 255, 255, 230));
+                    g2.setColor(UiPalette.SHOP_CURSOR);
                     int[] xs = {cursorX, cursorX + cursorSize, cursorX + cursorSize / 2};
                     int[] ys = {cursorY, cursorY, cursorY - cursorSize};
                     g2.fillPolygon(xs, ys, 3);
@@ -477,16 +478,17 @@ public final class ShopDialog extends JDialog {
                 int arc = Math.max(16, h / 2);
                 boolean pressed = button.getModel().isPressed();
                 boolean hover = button.getModel().isRollover();
-                Color base = pressed ? new Color(18, 18, 28) : new Color(26, 26, 40);
+                Color base = pressed ? UiPalette.BUTTON_BASE_PRESSED : UiPalette.BUTTON_BASE;
                 if (hover && !pressed) {
                     base = base.brighter();
                 }
                 g2.setColor(base);
                 g2.fillRoundRect(0, 0, w, h, arc, arc);
-                g2.setColor(new Color(255, 255, 255, hover ? 250 : 220));
+                Color border = hover ? UiPalette.BUTTON_BORDER_GLOW_HOVER : UiPalette.BUTTON_BORDER_GLOW;
+                g2.setColor(border);
                 g2.setStroke(new BasicStroke(2.4f));
                 g2.drawRoundRect(1, 1, w - 2, h - 2, arc - 2, arc - 2);
-                g2.setColor(new Color(0, 0, 0, 140));
+                g2.setColor(UiPalette.BUTTON_INNER_SHADOW);
                 g2.drawRoundRect(2, 2, w - 4, h - 4, arc - 4, arc - 4);
             } finally {
                 g2.dispose();
@@ -500,8 +502,11 @@ public final class ShopDialog extends JDialog {
             try {
                 g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
                 int baseline = textRect.y + g2.getFontMetrics().getAscent();
-                UndertaleText.drawString(g2, text == null ? "" : text.toUpperCase(Locale.ENGLISH),
-                        textRect.x, baseline);
+                AbstractButton button = (AbstractButton) c;
+                boolean enabled = button.isEnabled();
+                Color color = enabled ? UiPalette.TEXT_PRIMARY : UiPalette.TEXT_MUTED;
+                DialogueText.drawString(g2, text == null ? "" : text.toUpperCase(Locale.ENGLISH),
+                        textRect.x, baseline, color);
             } finally {
                 g2.dispose();
             }

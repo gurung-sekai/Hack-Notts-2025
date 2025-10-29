@@ -1,5 +1,7 @@
 package World.cutscene;
 
+import World.ui.UiPalette;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
@@ -174,13 +176,12 @@ public final class CutsceneDialog extends JDialog {
             int boxWidth = getWidth() - margin * 2;
             int boxHeight = Math.max((int) (getHeight() * 0.26), 200);
             int boxY = getHeight() - boxHeight - margin;
-            g2.setColor(new Color(12, 16, 28, 220));
+            g2.setColor(UiPalette.CUTSCENE_BOX_FILL);
             g2.fillRoundRect(margin, boxY, boxWidth, boxHeight, margin, margin);
-            g2.setColor(new Color(255, 236, 190, 210));
+            g2.setColor(UiPalette.CUTSCENE_BORDER);
             g2.setStroke(new BasicStroke(Math.max(2f, margin / 12f)));
             g2.drawRoundRect(margin, boxY, boxWidth, boxHeight, margin, margin);
 
-            g2.setColor(new Color(255, 240, 210));
             float nameSize = Math.max(28f, getHeight() * 0.045f);
             float textSize = Math.max(24f, getHeight() * 0.035f);
             Font nameFont = g2.getFont().deriveFont(Font.BOLD, nameSize);
@@ -188,7 +189,7 @@ public final class CutsceneDialog extends JDialog {
             g2.setFont(nameFont);
             String speaker = slide.speaker() == null ? "" : slide.speaker();
             int speakerBaseline = boxY + (int) (margin * 1.2 + nameSize);
-            g2.drawString(speaker, margin * 2, speakerBaseline);
+            drawShadowedString(g2, speaker, margin * 2, speakerBaseline, UiPalette.CUTSCENE_NAME);
 
             g2.setFont(textFont);
             String text = currentText().substring(0, Math.min(charsVisible, currentText().length()));
@@ -217,10 +218,34 @@ public final class CutsceneDialog extends JDialog {
                     len = lastSpace + 1;
                 }
                 TextLayout layout = new TextLayout(line, g2.getFont(), g2.getFontRenderContext());
-                layout.draw(g2, x, cursorY);
+                drawShadowedLayout(g2, layout, x, cursorY, UiPalette.TEXT_PRIMARY);
                 cursorY += lineHeight;
                 remaining = remaining.substring(Math.min(len, remaining.length()));
             }
+        }
+
+        private void drawShadowedString(Graphics2D g2, String text, int x, int y, Color color) {
+            if (text == null || text.isBlank()) {
+                return;
+            }
+            Color original = g2.getColor();
+            g2.setColor(UiPalette.TEXT_SHADOW);
+            g2.drawString(text, x + 2, y + 2);
+            g2.setColor(color == null ? UiPalette.TEXT_PRIMARY : color);
+            g2.drawString(text, x, y);
+            g2.setColor(original);
+        }
+
+        private void drawShadowedLayout(Graphics2D g2, TextLayout layout, float x, float y, Color color) {
+            if (layout == null) {
+                return;
+            }
+            Color original = g2.getColor();
+            g2.setColor(UiPalette.TEXT_SHADOW);
+            layout.draw(g2, x + 2, y + 2);
+            g2.setColor(color == null ? UiPalette.TEXT_PRIMARY : color);
+            layout.draw(g2, x, y);
+            g2.setColor(original);
         }
     }
 }
