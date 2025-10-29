@@ -18,6 +18,15 @@
 **The Legend of Aetheria** is a 2D dungeon crawler built entirely in **pure Java**, without any engines or frameworks.
 Each dungeon is procedurally generated with randomized obstacles, enemy placements, and door configurations — creating a fresh experience every time.
 
+## Progression & Difficulty
+
+- **Difficulty selection:** Every new adventure begins with a choice between **Easy** (respawn at the latest boss checkpoint) and **Hard** (permadeath) modes.
+- **Vitality upgrades:** You now start too frail to challenge the first boss; collect coins and purchase at least **two Vitality Sigils** from the shop to unlock that battle. Later bosses demand even more sigils, so plan your farming routes.
+- **Dungeon wards & healing:** Additional wards can be purchased to extend your dungeon health pool while keeping the original base hearts intact. Healing flasks remain for topping off between encounters.
+- **Scaling combat:** Defeating enemies increases your damage tier, and every conquered boss raises both their future health pools and your own heroic stats—keeping encounters tense right to the finale.
+
+Together these systems ensure a deliberate power curve: prepare in the dungeon, spend wisely in the shop, and only then tackle the guardians guarding each lair.
+
 ## Development Documentation
 
 - [Legacy Maintenance Playbook](docs/LegacyMaintenancePlaybook.md) — structured guidance for tackling milestone-based upkeep, tagging releases, and keeping documentation consistent.

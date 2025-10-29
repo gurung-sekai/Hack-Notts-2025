@@ -356,8 +356,9 @@ public final class GameLauncher {
         }
 
         DungeonRoomsSnapshot data = snapshot.orElse(null);
+        DungeonRooms.Difficulty difficulty = data != null ? data.difficulty() : promptDifficulty();
         DungeonRooms panel = new DungeonRooms(launchSettings, controlsCopy, bundle, saver, exit, data,
-                new SwingBossBattleHost());
+                new SwingBossBattleHost(), difficulty);
         panel.setPreferredSize(launchSettings.resolution());
         panel.setMinimumSize(launchSettings.resolution());
         panel.setMaximumSize(launchSettings.resolution());
@@ -374,6 +375,22 @@ public final class GameLauncher {
         cardPanel.repaint();
 
         SwingUtilities.invokeLater(panel::requestFocusInWindow);
+    }
+
+    private DungeonRooms.Difficulty promptDifficulty() {
+        String[] options = {
+                "Easy - respawn at last checkpoint",
+                "Hard - no respawns"
+        };
+        int choice = JOptionPane.showOptionDialog(frame,
+                "Choose your challenge.",
+                "Select Difficulty",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]);
+        return choice == 1 ? DungeonRooms.Difficulty.HARD : DungeonRooms.Difficulty.EASY;
     }
 
     private void enableFullScreen() {
@@ -736,8 +753,10 @@ public final class GameLauncher {
 
     private final class SwingBossBattleHost implements DungeonRooms.BossBattleHost {
         @Override
-        public void runBossBattle(BossBattlePanel.BossKind kind, Consumer<BossBattlePanel.Outcome> outcomeHandler) {
-            BossBattlePanel panel = BossBattlePanel.create(kind, outcome -> {
+        public void runBossBattle(BossBattlePanel.BossKind kind,
+                                  BossBattlePanel.BattleTuning tuning,
+                                  Consumer<BossBattlePanel.Outcome> outcomeHandler) {
+            BossBattlePanel panel = BossBattlePanel.create(kind, tuning, outcome -> {
                 outcomeHandler.accept(outcome);
                 SwingUtilities.invokeLater(() -> {
                     if (bossWrapper != null) {
@@ -768,6 +787,11 @@ public final class GameLauncher {
             cardPanel.revalidate();
             cardPanel.repaint();
             SwingUtilities.invokeLater(panel::requestFocusInWindow);
+        }
+
+        @Override
+        public void runBossBattle(BossBattlePanel.BossKind kind, Consumer<BossBattlePanel.Outcome> outcomeHandler) {
+            runBossBattle(kind, null, outcomeHandler);
         }
     }
 

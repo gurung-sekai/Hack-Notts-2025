@@ -21,11 +21,23 @@ import java.util.Locale;
  */
 public final class ShopDialog extends JDialog {
 
-    public record Result(int remainingCoins, int resultingHp, String closingRemark) { }
+    private static final int VITALITY_STEP = 2;
+    private static final int DUNGEON_STEP = 1;
+
+    public record Result(int remainingCoins,
+                         int resultingHp,
+                         int vitalityLevel,
+                         int dungeonLevel,
+                         int resultingMaxHp,
+                         String closingRemark) { }
 
     private int coins;
     private int hp;
-    private final int maxHp;
+    private final int baseMaxHp;
+    private int vitalityLevel;
+    private int dungeonLevel;
+    private final int vitalityCap;
+    private final int dungeonCap;
     private final JLabel coinsLabel = new JLabel();
     private final JLabel hpLabel = new JLabel();
     private final DialogueBubble dialogue = new DialogueBubble();
@@ -35,12 +47,23 @@ public final class ShopDialog extends JDialog {
     private final Rectangle viewport;
     private String closingRemark;
 
-    private ShopDialog(Window owner, int coins, int hp, int maxHp) {
+    private ShopDialog(Window owner,
+                       int coins,
+                       int hp,
+                       int baseMaxHp,
+                       int vitalityLevel,
+                       int dungeonLevel,
+                       int vitalityCap,
+                       int dungeonCap) {
         super(owner, "Shop", ModalityType.APPLICATION_MODAL);
         this.viewport = preferredBounds(owner);
         this.coins = coins;
-        this.hp = hp;
-        this.maxHp = maxHp;
+        this.baseMaxHp = Math.max(1, baseMaxHp);
+        this.vitalityLevel = Math.max(0, vitalityLevel);
+        this.dungeonLevel = Math.max(0, dungeonLevel);
+        this.vitalityCap = Math.max(0, vitalityCap);
+        this.dungeonCap = Math.max(0, dungeonCap);
+        this.hp = Math.min(currentMaxHp(), Math.max(0, hp));
         this.uiScale = computeUiScale(owner, viewport.getSize());
         this.closingRemark = "The shopkeeper nods appreciatively.";
 
@@ -78,10 +101,17 @@ public final class ShopDialog extends JDialog {
         });
     }
 
-    public static Result showShop(Window owner, int coins, int hp, int maxHp) {
-        ShopDialog dialog = new ShopDialog(owner, coins, hp, maxHp);
+    public static Result showShop(Window owner,
+                                  int coins,
+                                  int hp,
+                                  int baseMaxHp,
+                                  int vitalityLevel,
+                                  int dungeonLevel,
+                                  int vitalityCap,
+                                  int dungeonCap) {
+        ShopDialog dialog = new ShopDialog(owner, coins, hp, baseMaxHp, vitalityLevel, dungeonLevel, vitalityCap, dungeonCap);
         dialog.setVisible(true);
-        return new Result(dialog.coins, dialog.hp, dialog.closingRemark);
+        return new Result(dialog.coins, dialog.hp, dialog.vitalityLevel, dialog.dungeonLevel, dialog.currentMaxHp(), dialog.closingRemark);
     }
 
     private class ShopPanel extends JPanel {
@@ -265,26 +295,70 @@ public final class ShopDialog extends JDialog {
     }
 
     private void attemptPurchase(ShopItem item) {
-        if (coins < item.cost) {
-            updateDialogue("You'll need " + (item.cost - coins) + " more coins for that elixir.");
+        if (item == null) {
             return;
         }
-        coins -= item.cost;
-        int healAmount = item.heal >= maxHp ? maxHp : item.heal;
-        if (hp >= maxHp && healAmount >= maxHp) {
-            updateDialogue("You're already brimming with vitality!");
-            coins += item.cost;
-            updateLabels();
-            return;
+        int maxHp = currentMaxHp();
+        switch (item.type) {
+            case HEAL -> {
+                if (coins < item.cost) {
+                    updateDialogue("You'll need " + (item.cost - coins) + " more coins for that elixir.");
+                    break;
+                }
+                int healAmount = item.magnitude >= maxHp ? maxHp : item.magnitude;
+                if (hp >= maxHp && healAmount >= maxHp) {
+                    updateDialogue("You're already brimming with vitality!");
+                    break;
+                }
+                coins -= item.cost;
+                hp = Math.min(maxHp, hp + healAmount);
+                updateDialogue(item.response);
+            }
+            case VITALITY_UPGRADE -> {
+                if (vitalityLevel >= vitalityCap) {
+                    updateDialogue("Your spirit cannot channel any more sigils.");
+                    break;
+                }
+                if (coins < item.cost) {
+                    updateDialogue("You'll need " + (item.cost - coins) + " more coins for that sigil.");
+                    break;
+                }
+                coins -= item.cost;
+                vitalityLevel++;
+                hp = currentMaxHp();
+                updateDialogue(item.response);
+            }
+            case DUNGEON_UPGRADE -> {
+                if (dungeonLevel >= dungeonCap) {
+                    updateDialogue("Your armor cannot bear more wards.");
+                    break;
+                }
+                if (coins < item.cost) {
+                    updateDialogue("You'll need " + (item.cost - coins) + " more coins for that ward.");
+                    break;
+                }
+                coins -= item.cost;
+                dungeonLevel++;
+                hp = currentMaxHp();
+                updateDialogue(item.response);
+            }
         }
-        hp = Math.min(maxHp, hp + healAmount);
-        updateDialogue(item.response);
         updateLabels();
     }
 
     private void updateLabels() {
         coinsLabel.setText(String.format("COINS: %d", coins).toUpperCase(Locale.ENGLISH));
-        hpLabel.setText(String.format("HEALTH: %d / %d", hp, maxHp).toUpperCase(Locale.ENGLISH));
+        hpLabel.setText(String.format("HEALTH: %d / %d   VIT %d/%d   DUN %d/%d",
+                hp,
+                currentMaxHp(),
+                vitalityLevel,
+                Math.max(1, vitalityCap),
+                dungeonLevel,
+                Math.max(1, dungeonCap)).toUpperCase(Locale.ENGLISH));
+    }
+
+    private int currentMaxHp() {
+        return baseMaxHp + vitalityLevel * VITALITY_STEP + dungeonLevel * DUNGEON_STEP;
     }
 
     private void updateDialogue(String text) {
@@ -314,20 +388,26 @@ public final class ShopDialog extends JDialog {
         return (float) (size * uiScale);
     }
 
+    private enum ShopItemType { HEAL, VITALITY_UPGRADE, DUNGEON_UPGRADE }
+
     private enum ShopItem {
-        SMALL("Small Flask (+2 HP) - 8 coins", 8, 2, "A gentle warmth rushes through you."),
-        GRAND("Grand Brew (+4 HP) - 18 coins", 18, 4, "May your steps grow lighter."),
-        ROYAL("Royal Panacea (Full heal) - 32 coins", 32, Integer.MAX_VALUE, "A royal remedy worthy of legends!");
+        SMALL("Small Flask (+2 HP) - 8 coins", 8, 2, ShopItemType.HEAL, "A gentle warmth rushes through you."),
+        GRAND("Grand Brew (+4 HP) - 18 coins", 18, 4, ShopItemType.HEAL, "May your steps grow lighter."),
+        ROYAL("Royal Panacea (Full heal) - 32 coins", 32, Integer.MAX_VALUE, ShopItemType.HEAL, "A royal remedy worthy of legends!"),
+        VITALITY("Vitality Sigil (+2 Max HP) - 40 coins", 40, VITALITY_STEP, ShopItemType.VITALITY_UPGRADE, "Your heart swells with renewed vigor."),
+        BULWARK("Bulwark Ward (+1 Dungeon Heart) - 24 coins", 24, DUNGEON_STEP, ShopItemType.DUNGEON_UPGRADE, "Stonebound resilience surrounds you.");
 
         private final String label;
         private final int cost;
-        private final int heal;
+        private final int magnitude;
+        private final ShopItemType type;
         private final String response;
 
-        ShopItem(String label, int cost, int heal, String response) {
+        ShopItem(String label, int cost, int magnitude, ShopItemType type, String response) {
             this.label = label;
             this.cost = cost;
-            this.heal = heal;
+            this.magnitude = magnitude;
+            this.type = type;
             this.response = response;
         }
 

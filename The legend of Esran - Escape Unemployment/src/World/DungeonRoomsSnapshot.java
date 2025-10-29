@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -57,6 +57,14 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final boolean finaleShown;
     private final Random rng;
     private final SecureRandom secureRandom;
+    private final int vitalityLevel;
+    private final int dungeonLevel;
+    private final int damageLevel;
+    private final int enemiesDefeated;
+    private final int bossesDefeated;
+    private final DungeonRooms.Difficulty difficulty;
+    private final Point checkpointRoom;
+    private final BossBattlePanel.BossKind checkpointBoss;
 
     DungeonRoomsSnapshot(Map<Point, DungeonRooms.Room> world,
                          Map<Point, DungeonRooms.BossEncounter> bossEncounters,
@@ -92,7 +100,15 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          boolean queenRescued,
                          boolean finaleShown,
                          Random rng,
-                         SecureRandom secureRandom) {
+                         SecureRandom secureRandom,
+                         int vitalityLevel,
+                         int dungeonLevel,
+                         int damageLevel,
+                         int enemiesDefeated,
+                         int bossesDefeated,
+                         DungeonRooms.Difficulty difficulty,
+                         Point checkpointRoom,
+                         BossBattlePanel.BossKind checkpointBoss) {
         this.world = copyRooms(world);
         this.bossEncounters = copyBossEncounters(bossEncounters);
         this.visited = copyVisited(visited);
@@ -128,6 +144,14 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.finaleShown = finaleShown;
         this.rng = rng == null ? null : copyRandom(rng);
         this.secureRandom = secureRandom == null ? null : copySecureRandom(secureRandom);
+        this.vitalityLevel = vitalityLevel;
+        this.dungeonLevel = dungeonLevel;
+        this.damageLevel = damageLevel;
+        this.enemiesDefeated = enemiesDefeated;
+        this.bossesDefeated = bossesDefeated;
+        this.difficulty = difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
+        this.checkpointRoom = checkpointRoom == null ? null : new Point(checkpointRoom);
+        this.checkpointBoss = checkpointBoss;
     }
 
     public Map<Point, DungeonRooms.Room> world() {
@@ -270,6 +294,38 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return secureRandom == null ? new SecureRandom() : copySecureRandom(secureRandom);
     }
 
+    public int vitalityLevel() {
+        return vitalityLevel;
+    }
+
+    public int dungeonLevel() {
+        return dungeonLevel;
+    }
+
+    public int damageLevel() {
+        return damageLevel;
+    }
+
+    public int enemiesDefeated() {
+        return enemiesDefeated;
+    }
+
+    public int bossesDefeated() {
+        return bossesDefeated;
+    }
+
+    public DungeonRooms.Difficulty difficulty() {
+        return difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
+    }
+
+    public Point checkpointRoom() {
+        return checkpointRoom == null ? null : new Point(checkpointRoom);
+    }
+
+    public BossBattlePanel.BossKind checkpointBoss() {
+        return checkpointBoss;
+    }
+
     private static Map<Point, DungeonRooms.Room> copyRooms(Map<Point, DungeonRooms.Room> source) {
         Map<Point, DungeonRooms.Room> result = new HashMap<>();
         if (source == null) {
@@ -325,6 +381,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
             copy.defeated = original.defeated;
             copy.rewardClaimed = original.rewardClaimed;
             copy.preludeShown = original.preludeShown;
+            copy.requiredVitalityLevel = original.requiredVitalityLevel;
             result.put(new Point(entry.getKey()), copy);
         }
         return result;

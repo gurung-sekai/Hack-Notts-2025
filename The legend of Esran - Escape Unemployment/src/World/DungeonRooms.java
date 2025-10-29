@@ -1,5 +1,6 @@
 package World;
 
+import Battle.domain.Stats;
 import Battle.scene.BossBattlePanel;
 import Battle.scene.BossBattlePanel.Outcome;
 import World.DialogueText;
@@ -119,6 +120,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     enum TrapKind { SAW, SPIKE, FIRE_VENT }
 
+    public enum Difficulty { EASY, HARD }
+
     private enum MinimapRoomKind { CURRENT, BOSS_ACTIVE, BOSS_DEFEATED, SHOP, VISITED, ACCESSIBLE, LOCKED, UNKNOWN }
 
     private static final List<BossBattlePanel.BossKind> STORY_BOSS_SEQUENCE = List.of(
@@ -212,11 +215,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     static class BossEncounter implements Serializable {
         @Serial
-        private static final long serialVersionUID = 2L;
+        private static final long serialVersionUID = 3L;
         BossBattlePanel.BossKind kind;
         boolean defeated = false;
         boolean rewardClaimed = false;
         boolean preludeShown = false;
+        int requiredVitalityLevel = 0;
     }
 
     static class Room implements Serializable {
@@ -387,7 +391,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     };
 
     private static final int MESSAGE_SECONDS = 3;
-    private static final int MAX_PLAYER_HP = 5;
+    private static final int BASE_PLAYER_HP = 6;
+    private static final int VITALITY_STEP = 2;
+    private static final int DUNGEON_HEART_STEP = 1;
+    private static final double BASE_PLAYER_DAMAGE = 1.0;
+    private static final double DAMAGE_STEP = 0.35;
+    private static final int[] DAMAGE_THRESHOLDS = {10, 24, 45, 72, 110};
+    private static final int MAX_VITALITY_UPGRADES = 6;
+    private static final int MAX_DUNGEON_HEART_UPGRADES = 6;
     private static final int HEAL_FLASH_TICKS = FPS * 2;
     private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
     private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
@@ -437,7 +448,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private final List<Bullet> bullets = new ArrayList<>();       // enemy bullets
     private final List<Bullet> playerBullets = new ArrayList<>(); // player bullets
     private final List<Explosion> explosions = new ArrayList<>();
-    private int playerHP = MAX_PLAYER_HP;
+    private int playerHP = BASE_PLAYER_HP;
     private int iFrames = 0;
     private int healTicks = 0;
     private double playerDamageBuffer = 0.0;
@@ -462,6 +473,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private boolean queenRescued = false;
     private boolean finaleShown = false;
     private int textureEpoch = 0;
+    private int vitalityUpgrades = 0;
+    private int dungeonHeartUpgrades = 0;
+    private int damageLevel = 0;
+    private int enemiesDefeated = 0;
+    private int bossesDefeated = 0;
+    private Difficulty difficulty = Difficulty.EASY;
+    private Point checkpointRoom = new Point(0, 0);
+    private BossBattlePanel.BossKind checkpointBoss = null;
+    private boolean gameOverShown = false;
 
     public DungeonRooms(GameSettings settings,
                         ControlsProfile controls,
@@ -469,7 +489,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                         Consumer<DungeonRoomsSnapshot> saveHandler,
                         Runnable exitHandler,
                         DungeonRoomsSnapshot snapshot,
-                        BossBattleHost bossBattleHost) {
+                        BossBattleHost bossBattleHost,
+                        Difficulty difficulty) {
         GameSecurity.verifyIntegrity();
         this.settings = settings == null ? new GameSettings() : new GameSettings(settings);
         this.controls = controls == null ? new ControlsProfile() : new ControlsProfile(controls);
@@ -477,6 +498,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         this.saveHandler = saveHandler == null ? snapshotIgnored -> { } : saveHandler;
         this.exitHandler = exitHandler == null ? () -> { } : exitHandler;
         this.bossBattleHost = bossBattleHost;
+        this.difficulty = difficulty == null ? Difficulty.EASY : difficulty;
         this.timer = new Timer(1000 / Math.max(30, this.settings.refreshRate()), this);
         this.messageDurationTicks = Math.max(1, this.settings.refreshRate() * MESSAGE_SECONDS);
         this.renderSize = this.settings.resolution();
@@ -523,7 +545,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playerBullets.clear();
         explosions.clear();
         up = down = left = right = false;
-        playerHP = MAX_PLAYER_HP;
+        vitalityUpgrades = 0;
+        dungeonHeartUpgrades = 0;
+        damageLevel = 0;
+        enemiesDefeated = 0;
+        bossesDefeated = 0;
+        checkpointRoom = new Point(worldPos);
+        checkpointBoss = null;
+        gameOverShown = false;
+        playerHP = playerMaxHp();
         iFrames = 0;
         playerDamageBuffer = 0.0;
         keysHeld = 0;
@@ -586,6 +616,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playerDamageBuffer = snapshot.playerDamageBuffer();
         keysHeld = snapshot.keysHeld();
         coins = Math.max(0, snapshot.coins());
+        vitalityUpgrades = Math.min(MAX_VITALITY_UPGRADES, Math.max(0, snapshot.vitalityLevel()));
+        dungeonHeartUpgrades = Math.min(MAX_DUNGEON_HEART_UPGRADES, Math.max(0, snapshot.dungeonLevel()));
+        damageLevel = Math.max(0, snapshot.damageLevel());
+        enemiesDefeated = Math.max(0, snapshot.enemiesDefeated());
+        bossesDefeated = Math.max(0, snapshot.bossesDefeated());
+        difficulty = snapshot.difficulty();
+        Point restoredCheckpoint = snapshot.checkpointRoom();
+        checkpointRoom = restoredCheckpoint == null ? new Point(worldPos) : restoredCheckpoint;
+        checkpointBoss = snapshot.checkpointBoss();
+        refreshPlayerHpAfterUpgrade();
         statusMessage = snapshot.statusMessage() == null ? "" : snapshot.statusMessage();
         statusTicks = snapshot.statusTicks();
         inBoss = snapshot.inBoss();
@@ -1504,8 +1544,19 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         awaitingShopExitClear = true;
         nudgePlayerAwayFromShopDoor(doorSide);
         pauseForOverlay(() -> {
-            ShopDialog.Result result = ShopDialog.showShop(SwingUtilities.getWindowAncestor(DungeonRooms.this), coins, playerHP, MAX_PLAYER_HP);
+            ShopDialog.Result result = ShopDialog.showShop(
+                    SwingUtilities.getWindowAncestor(DungeonRooms.this),
+                    coins,
+                    playerHP,
+                    BASE_PLAYER_HP,
+                    vitalityUpgrades,
+                    dungeonHeartUpgrades,
+                    MAX_VITALITY_UPGRADES,
+                    MAX_DUNGEON_HEART_UPGRADES);
             coins = Math.max(0, result.remainingCoins());
+            vitalityUpgrades = Math.min(MAX_VITALITY_UPGRADES, Math.max(0, result.vitalityLevel()));
+            dungeonHeartUpgrades = Math.min(MAX_DUNGEON_HEART_UPGRADES, Math.max(0, result.dungeonLevel()));
+            refreshPlayerHpAfterUpgrade();
             healPlayerTo(result.resultingHp());
             String remark = result.closingRemark();
             if (remark != null && !remark.isBlank()) {
@@ -1586,12 +1637,32 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void healPlayerTo(int targetHp) {
-        int clamped = Math.max(0, Math.min(MAX_PLAYER_HP, targetHp));
+        int clamped = Math.max(0, Math.min(playerMaxHp(), targetHp));
         if (clamped > playerHP) {
             playerHP = clamped;
             healTicks = HEAL_FLASH_TICKS;
         } else {
             playerHP = clamped;
+        }
+    }
+
+    private int playerMaxHp() {
+        return BASE_PLAYER_HP + vitalityUpgrades * VITALITY_STEP + dungeonHeartUpgrades * DUNGEON_HEART_STEP;
+    }
+
+    private void refreshPlayerHpAfterUpgrade() {
+        playerHP = Math.min(playerHP, playerMaxHp());
+    }
+
+    private double playerDamage() {
+        return BASE_PLAYER_DAMAGE + damageLevel * DAMAGE_STEP;
+    }
+
+    private void registerEnemyDefeat() {
+        enemiesDefeated++;
+        while (damageLevel < DAMAGE_THRESHOLDS.length && enemiesDefeated >= DAMAGE_THRESHOLDS[damageLevel]) {
+            damageLevel++;
+            showMessage("Your strikes grow stronger! (Power " + (damageLevel + 1) + ")");
         }
     }
 
@@ -2404,6 +2475,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (enemy.spawn != null) {
             enemy.spawn.defeated = true;
         }
+        registerEnemyDefeat();
         spawnKeyPickup(r, enemy.x, enemy.y);
         if (enemy.coinReward > 0) {
             spawnCoinPickup(r, enemy.x, enemy.y, enemy.coinReward);
@@ -2502,9 +2574,20 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (inBoss) return;
         BossEncounter encounter = bossEncounters.get(worldPos);
         if (encounter != null && !encounter.defeated) {
+            if (!canEnterBossEncounter(encounter)) {
+                showMessage("A crushing aura repels you. Vitality sigils required: " + encounter.requiredVitalityLevel);
+                return;
+            }
             showMessage(texts.text("boss_challenge", formatBossName(encounter.kind)));
             triggerBossEncounter(encounter);
         }
+    }
+
+    private boolean canEnterBossEncounter(BossEncounter encounter) {
+        if (encounter == null) {
+            return true;
+        }
+        return vitalityUpgrades >= encounter.requiredVitalityLevel;
     }
 
     private void showMessage(String message) {
@@ -2535,8 +2618,24 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (bossPool.isEmpty()) return null;
         BossEncounter created = new BossEncounter();
         created.kind = bossPool.remove(0);
+        created.requiredVitalityLevel = Math.min(MAX_VITALITY_UPGRADES, Math.max(2, 2 + bossesDefeated));
         bossEncounters.put(new Point(pos), created);
         return created;
+    }
+
+    private BossEncounter previewBossFor(Point pos, boolean consumedKey) {
+        if (pos == null) {
+            return null;
+        }
+        BossEncounter existing = bossEncounters.get(pos);
+        if (existing != null) {
+            return existing;
+        }
+        boolean isNewVisit = !visited.contains(new Point(pos));
+        if (isNewVisit && (roomsVisited == 1 || consumedKey)) {
+            return ensureBossFor(pos);
+        }
+        return null;
     }
 
     private void prepareBossRoom(Room targetRoom) {
@@ -2550,11 +2649,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (encounter == null || encounter.rewardClaimed) return;
         encounter.rewardClaimed = true;
         keysHeld++;
-        healPlayerTo(MAX_PLAYER_HP);
+        healPlayerTo(playerMaxHp());
         int rewardCoins = 25;
         coins += rewardCoins;
-        String victory = texts.text("victory_heal", keysHeld, MAX_PLAYER_HP);
+        String victory = texts.text("victory_heal", keysHeld, playerMaxHp());
         showMessage(victory + "  +" + rewardCoins + " coins");
+        bossesDefeated++;
+        checkpointRoom = new Point(worldPos);
+        checkpointBoss = encounter.kind;
     }
 
     private static String formatBossName(BossBattlePanel.BossKind kind) {
@@ -2637,35 +2739,47 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void onPlayerDeath() {
         SwingUtilities.invokeLater(() -> {
-            // Respawn at origin room with full HP and brief invulnerability
-            playerHP = MAX_PLAYER_HP;
-            iFrames = 60;
-            playerDamageBuffer = 0.0;
-            up = down = left = right = false;
-            inBoss = false;
-            bullets.clear();
-            playerBullets.clear();
-            explosions.clear();
-            world.clear();
-            bossEncounters.clear();
-            visited.clear();
-            roomsVisited = 1;
-            keysHeld = 0;
-            statusMessage = "";
-            statusTicks = 0;
-            shopManager.reset();
-            initializeBossPool();
-            worldPos = new Point(0, 0);
-            room = makeOrGetRoom(worldPos, null);
-            spawnEnemiesIfNeeded(worldPos, room);
-            visited.add(new Point(worldPos));
-            placePlayerAtCenter();
-            trapPlayer.reset();
-            shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
-            showMessage(texts.text("respawn"));
-            repaint();
-            requestFocusInWindow();
+            if (difficulty == Difficulty.HARD) {
+                if (!gameOverShown) {
+                    gameOverShown = true;
+                    JOptionPane.showMessageDialog(DungeonRooms.this,
+                            "Your adventure ends here.",
+                            "Game Over",
+                            JOptionPane.INFORMATION_MESSAGE);
+                }
+                exitHandler.run();
+                return;
+            }
+            respawnAtCheckpoint();
         });
+    }
+
+    private void respawnAtCheckpoint() {
+        bullets.clear();
+        playerBullets.clear();
+        explosions.clear();
+        clearMovementInput(true);
+        playerDamageBuffer = 0.0;
+        inBoss = false;
+        awaitingShopExitClear = false;
+        lastShopDoorway = null;
+
+        Point target = checkpointRoom == null ? new Point(0, 0) : new Point(checkpointRoom);
+        worldPos = target;
+        room = makeOrGetRoom(worldPos, null);
+        ensureTrapLayoutForRoom(worldPos, room);
+        spawnEnemiesIfNeeded(worldPos, room);
+        visited.add(new Point(worldPos));
+        placePlayerAtCenter();
+        trapPlayer.reset();
+        shopManager.ensureDoorway(room, worldPos, this::hasRoomAt, this::carveDoorOnGrid, this::markRoomDirty);
+        refreshPlayerHpAfterUpgrade();
+        healPlayerTo(playerMaxHp());
+        iFrames = 120;
+        showMessage(texts.text("respawn"));
+        repaint();
+        requestFocusInWindow();
+        persistProgressAsync("checkpoint respawn");
     }
 
     private void triggerBossEncounter(BossEncounter encounter) {
@@ -2673,6 +2787,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playBossPrelude(encounter);
         inBoss = true;
         timer.stop();
+        BossBattlePanel.BattleTuning tuning = createBattleTuning(encounter);
         Consumer<Outcome> finish = outcome -> SwingUtilities.invokeLater(() -> {
             if (outcome == Outcome.HERO_WIN) {
                 encounter.defeated = true;
@@ -2695,14 +2810,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         });
 
         if (bossBattleHost != null) {
-            bossBattleHost.runBossBattle(encounter.kind, finish);
+            bossBattleHost.runBossBattle(encounter.kind, tuning, finish);
             return;
         }
 
         SwingUtilities.invokeLater(() -> {
             JFrame f = new JFrame("Boss Battle");
             f.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-            f.setContentPane(BossBattlePanel.create(encounter.kind, outcome -> {
+            f.setContentPane(BossBattlePanel.create(encounter.kind, tuning, outcome -> {
                 finish.accept(outcome);
                 f.dispose();
             }));
@@ -2710,6 +2825,35 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             f.setLocationRelativeTo(null);
             f.setVisible(true);
         });
+    }
+
+    private BossBattlePanel.BattleTuning createBattleTuning(BossEncounter encounter) {
+        int maxHp = playerMaxHp();
+        int heroHp = 180 + maxHp * 18;
+        int heroPower = 26 + damageLevel * 4;
+        int heroGuard = 18 + Math.max(0, vitalityUpgrades) * 2 + Math.max(0, dungeonHeartUpgrades);
+        int heroSpeed = 18 + Math.max(0, damageLevel);
+        Stats stats = new Stats(heroHp, heroPower, heroGuard, heroSpeed);
+        double heroOffense = 1.08 + damageLevel * 0.05;
+        double heroDefense = 1.18 + (vitalityUpgrades + dungeonHeartUpgrades) * 0.04;
+        int heroMomentum = Math.min(4, 2 + damageLevel / 2);
+
+        double bossHealthMultiplier = 1.0 + Math.max(0, bossesDefeated) * 0.15;
+        if (encounter != null) {
+            bossHealthMultiplier += Math.max(0, encounter.requiredVitalityLevel - 2) * 0.08;
+        }
+        double bossOffenseMultiplier = 1.0 + Math.max(0, bossesDefeated) * 0.08;
+        double bossDefenseMultiplier = 1.0 + Math.max(0, bossesDefeated) * 0.06;
+        int bossHealthBonus = maxHp * 6;
+
+        return new BossBattlePanel.BattleTuning(stats,
+                heroOffense,
+                heroDefense,
+                heroMomentum,
+                bossHealthMultiplier,
+                bossOffenseMultiplier,
+                bossDefenseMultiplier,
+                bossHealthBonus);
     }
 
     private static boolean intersectsCircleRect(double cx, double cy, double r, Rectangle rect) {
@@ -2733,7 +2877,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         b.vy = dy / l * spd;
         b.r = PLAYER_PROJECTILE_RADIUS;
         b.friendly = true;
-        b.damage = 1.0;
+        b.damage = playerDamage();
         b.maxLife = 360;
         b.useTexture = true;
         playerBullets.add(b);
@@ -3111,6 +3255,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         // In the new room, we must have a door on the opposite side (our entrance)
         Dir entranceSide = opposite(exitSide);
+
+        BossEncounter pendingEncounter = previewBossFor(nextPos, consumedKey);
+        if (pendingEncounter != null && !pendingEncounter.defeated && !canEnterBossEncounter(pendingEncounter)) {
+            showMessage("The guardian beyond demands " + pendingEncounter.requiredVitalityLevel + " vitality sigils.");
+            suppressNextMovementPress = true;
+            return;
+        }
 
         // Load or create the room and guarantee the entrance
         Room nextRoom = makeOrGetRoom(nextPos, entranceSide);
@@ -3912,7 +4063,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         List<String> infoLines = new ArrayList<>();
         String invul = iFrames > 0 ? " (INVUL)" : "";
-        infoLines.add(String.format("HP: %d%s", playerHP, invul).toUpperCase(Locale.ENGLISH));
+        infoLines.add(String.format("HP: %d / %d%s", playerHP, playerMaxHp(), invul).toUpperCase(Locale.ENGLISH));
+        infoLines.add(String.format("VIT: %d   DUN: %d   DMG: %d",
+                vitalityUpgrades,
+                dungeonHeartUpgrades,
+                damageLevel + 1).toUpperCase(Locale.ENGLISH));
+        infoLines.add(String.format("MODE: %s   BOSSES: %d", difficulty.name(), bossesDefeated).toUpperCase(Locale.ENGLISH));
         infoLines.add(String.format("KEYS: %d   COINS: %d", keysHeld, coins).toUpperCase(Locale.ENGLISH));
         if (worldPos != null) {
             infoLines.add(String.format("ROOM: (%d, %d)", worldPos.x, worldPos.y).toUpperCase(Locale.ENGLISH));
@@ -4551,6 +4707,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 continue;
             }
             boolean isShopDoor = dir == room.shopDoor;
+            BossEncounter bossDoor = bossEncounterBehind(dir);
+            boolean isBossDoor = bossDoor != null;
             int px = tile.x * TILE;
             int py = tile.y * TILE;
             AffineTransform original = gg.getTransform();
@@ -4574,6 +4732,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             gg.setTransform(original);
             if (isShopDoor) {
                 drawShopDoorHighlight(gg, dir, px, py, frame);
+            } else if (isBossDoor) {
+                drawBossDoorHighlight(gg, dir, px, py, frame, bossDoor);
             }
         }
     }
@@ -4646,6 +4806,106 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     new Color[]{
                             new Color(255, 214, 120, 150),
                             new Color(255, 214, 120, 0)
+                    }
+            ));
+            g2.fill(floorGlow);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private BossEncounter bossEncounterBehind(Dir dir) {
+        if (dir == null || worldPos == null || bossEncounters == null) {
+            return null;
+        }
+        Point target = step(worldPos, dir);
+        if (target == null) {
+            return null;
+        }
+        BossEncounter encounter = bossEncounters.get(target);
+        if (encounter != null && !encounter.defeated) {
+            return encounter;
+        }
+        return null;
+    }
+
+    private void drawBossDoorHighlight(Graphics2D gg, Dir dir, int px, int py, BufferedImage frame, BossEncounter encounter) {
+        if (gg == null || dir == null) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) gg.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int doorWidth = frame != null ? frame.getWidth() : TILE;
+            int doorHeight = frame != null ? frame.getHeight() : TILE;
+            int centerX = px + TILE / 2;
+            int centerY = py + TILE / 2;
+            double rotation = switch (dir) {
+                case N -> Math.PI;
+                case S -> 0;
+                case W -> Math.PI / 2.0;
+                case E -> -Math.PI / 2.0;
+            };
+            g2.translate(centerX, centerY);
+            g2.rotate(rotation);
+
+            double glowWidth = doorWidth + 36;
+            double glowHeight = doorHeight + 52;
+            RoundRectangle2D halo = new RoundRectangle2D.Double(
+                    -glowWidth / 2.0,
+                    -glowHeight / 2.0,
+                    glowWidth,
+                    glowHeight,
+                    20,
+                    20);
+
+            float pulse = (float) (0.5 + 0.5 * Math.sin(animTick / 8.0));
+            g2.setPaint(new RadialGradientPaint(
+                    new Point2D.Float(0f, (float) (-doorHeight / 3.0)),
+                    (float) (glowWidth / 1.3),
+                    new float[]{0f, 0.6f, 1f},
+                    new Color[]{
+                            new Color(255, 96, 120, (int) Math.round(160 + pulse * 80)),
+                            new Color(200, 40, 80, 50),
+                            new Color(200, 40, 80, 0)
+                    }
+            ));
+            g2.fill(halo);
+            g2.setStroke(new BasicStroke(2.4f));
+            g2.setColor(new Color(120, 20, 40, 220));
+            g2.draw(halo);
+
+            Font previous = g2.getFont();
+            g2.setFont(DialogueText.font(Math.max(18f, Math.min(26f, doorWidth / 1.6f))));
+            FontMetrics metrics = g2.getFontMetrics();
+            String label = "BOSS";
+            int textWidth = metrics.stringWidth(label);
+            int baseline = (int) Math.round(-doorHeight / 2.0 - 8);
+            g2.setColor(new Color(20, 4, 4, 245));
+            g2.drawString(label, -textWidth / 2f, baseline);
+
+            if (encounter != null && encounter.requiredVitalityLevel > vitalityUpgrades) {
+                String req = "VIT " + encounter.requiredVitalityLevel;
+                g2.setFont(DialogueText.font(Math.max(14f, Math.min(20f, doorWidth / 2.2f))));
+                FontMetrics reqMetrics = g2.getFontMetrics();
+                int reqWidth = reqMetrics.stringWidth(req);
+                g2.setColor(new Color(255, 220, 220, 220));
+                g2.drawString(req, -reqWidth / 2f, baseline - reqMetrics.getHeight());
+            }
+            g2.setFont(previous);
+
+            Ellipse2D floorGlow = new Ellipse2D.Double(
+                    -doorWidth * 1.0,
+                    doorHeight / 2.0 - 6,
+                    doorWidth * 2.0,
+                    26);
+            g2.setPaint(new RadialGradientPaint(
+                    new Point2D.Float(0f, (float) (doorHeight / 2.0)),
+                    (float) (doorWidth * 1.1),
+                    new float[]{0f, 1f},
+                    new Color[]{
+                            new Color(255, 110, 140, 140),
+                            new Color(255, 110, 140, 0)
                     }
             ));
             g2.fill(floorGlow);
@@ -4838,7 +5098,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 queenRescued,
                 finaleShown,
                 rng,
-                secureRandom
+                secureRandom,
+                vitalityUpgrades,
+                dungeonHeartUpgrades,
+                damageLevel,
+                enemiesDefeated,
+                bossesDefeated,
+                difficulty,
+                checkpointRoom,
+                checkpointBoss
         );
     }
 
@@ -4852,6 +5120,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
      * the supplied callback when the fight resolves.
      */
     public interface BossBattleHost {
+        default void runBossBattle(BossBattlePanel.BossKind kind,
+                                   BossBattlePanel.BattleTuning tuning,
+                                   Consumer<Outcome> outcomeHandler) {
+            runBossBattle(kind, outcomeHandler);
+        }
+
         void runBossBattle(BossBattlePanel.BossKind kind, Consumer<Outcome> outcomeHandler);
     }
 
