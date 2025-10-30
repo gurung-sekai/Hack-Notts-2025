@@ -4,6 +4,14 @@
 
 ### In our team we have Pritam, Esran, Jaleel, and Ola
 
+## Team Members
+
+[![Pritam Gurung](https://img.shields.io/badge/LinkedIn-Pritam_Gurung-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/pritamgurung1/)  
+[![Esran Stewart](https://img.shields.io/badge/LinkedIn-Esran_Stewart-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/esran-stewart-004a552b7/?skipRedirect=true)  
+[![Jaleel Shahin](https://img.shields.io/badge/LinkedIn-Jaleel_Shahin-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/jaleel-shahin-6a451a382/)  
+[![Oladamola Fayokun](https://img.shields.io/badge/LinkedIn-Oladamola_Fayokun-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/oladamola-fayokun-68622a216/)
+
+
 # The Legend of Aetheria
 
 > A procedurally generated Java dungeon crawler inspired by retro classics — built entirely from scratch.
