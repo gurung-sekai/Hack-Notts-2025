@@ -126,6 +126,7 @@ public final class GameLauncher {
     private TitleMusicPlayer musicPlayer;
     private OptionsDialog optionsDialog;
     private final IntegrityCheckReport integrityReport;
+    private boolean escapeToCloseEnabled = true;
 
     public static void main(String[] args) {
         GameSecurity.verifyIntegrity();
