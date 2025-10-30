@@ -125,6 +125,7 @@ public final class GameLauncher {
     private TitleMusicPlayer musicPlayer;
     private OptionsDialog optionsDialog;
     private final IntegrityCheckReport integrityReport;
+    private boolean escapeToCloseEnabled = true;
 
     public static void main(String[] args) {
         GameSecurity.verifyIntegrity();
@@ -180,7 +181,11 @@ public final class GameLauncher {
             enableFullScreen();
         }
 
-        frame.getRootPane().registerKeyboardAction(e -> closeLauncher(),
+        frame.getRootPane().registerKeyboardAction(e -> {
+                    if (escapeToCloseEnabled) {
+                        closeLauncher();
+                    }
+                },
                 KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
                 JComponent.WHEN_IN_FOCUSED_WINDOW);
 
@@ -320,6 +325,8 @@ public final class GameLauncher {
     private void launchGame(Optional<DungeonRoomsSnapshot> snapshot) {
         stopMenuAnimation();
         stopTitleMusic();
+
+        escapeToCloseEnabled = false;
 
         GameSettings launchSettings = new GameSettings(settings);
         ControlsProfile controlsCopy = launchSettings.controls();
@@ -476,6 +483,7 @@ public final class GameLauncher {
     }
 
     private void showMenuCard() {
+        escapeToCloseEnabled = true;
         if (resumeButton != null) {
             resumeButton.setEnabled(saveManager.hasSave());
         }
