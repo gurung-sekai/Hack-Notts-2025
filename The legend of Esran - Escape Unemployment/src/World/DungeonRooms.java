@@ -399,6 +399,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private static final int[] DAMAGE_THRESHOLDS = {10, 24, 45, 72, 110};
     private static final int MAX_VITALITY_UPGRADES = 6;
     private static final int MAX_DUNGEON_HEART_UPGRADES = 6;
+    private static final int MIN_EXPLORED_ROOMS_BEFORE_BOSS = 6;
+    private static final int SAFE_RING_RADIUS = 3;
+    private static final int MIN_VITALITY_FOR_BOSS_SPAWN = 2;
+    private static final int MAX_PENDING_BOSS_DOORS = 1;
     private static final int HEAL_FLASH_TICKS = FPS * 2;
     private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
     private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
@@ -2632,10 +2636,47 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return existing;
         }
         boolean isNewVisit = !visited.contains(new Point(pos));
-        if (isNewVisit && (roomsVisited == 1 || consumedKey)) {
-            return ensureBossFor(pos);
+        if (!isNewVisit) {
+            return null;
         }
-        return null;
+        if (!shouldSeedBossAt(pos, consumedKey)) {
+            return null;
+        }
+        return ensureBossFor(pos);
+    }
+
+    private boolean shouldSeedBossAt(Point pos, boolean consumedKey) {
+        if (pos == null) {
+            return false;
+        }
+        if (bossEncounters != null && activeBossDoors() >= MAX_PENDING_BOSS_DOORS) {
+            return false;
+        }
+        int requiredVitality = Math.min(MAX_VITALITY_UPGRADES, Math.max(MIN_VITALITY_FOR_BOSS_SPAWN, 2 + bossesDefeated));
+        if (vitalityUpgrades < requiredVitality) {
+            return false;
+        }
+        if (!consumedKey && roomsVisited < MIN_EXPLORED_ROOMS_BEFORE_BOSS) {
+            return false;
+        }
+        int distance = Math.abs(pos.x) + Math.abs(pos.y);
+        if (!consumedKey && distance < SAFE_RING_RADIUS) {
+            return false;
+        }
+        return true;
+    }
+
+    private int activeBossDoors() {
+        if (bossEncounters == null || bossEncounters.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        for (BossEncounter encounter : bossEncounters.values()) {
+            if (encounter != null && !encounter.defeated) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private void prepareBossRoom(Room targetRoom) {
@@ -3281,17 +3322,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playerBullets.clear();
         explosions.clear();
 
-        if (isNewVisit && roomsVisited == 2) {
-            BossEncounter encounter = ensureBossFor(worldPos);
-            if (encounter != null) {
-                prepareBossRoom(nextRoom);
-                showMessage(texts.text("boss_warning", formatBossName(encounter.kind)));
+        if (isNewVisit) {
+            BossEncounter encounter = bossEncounters.get(worldPos);
+            if (encounter == null && shouldSeedBossAt(worldPos, consumedKey)) {
+                encounter = ensureBossFor(worldPos);
             }
-        } else if (isNewVisit && consumedKey) {
-            BossEncounter encounter = ensureBossFor(worldPos);
-            if (encounter != null) {
+            if (encounter != null && !encounter.defeated) {
                 prepareBossRoom(nextRoom);
-                showMessage(texts.text("boss_unlock", formatBossName(encounter.kind)));
+                String messageKey = consumedKey ? "boss_unlock" : "boss_warning";
+                showMessage(texts.text(messageKey, formatBossName(encounter.kind)));
             }
         }
 

@@ -22,6 +22,7 @@ Each dungeon is procedurally generated with randomized obstacles, enemy placemen
 
 - **Difficulty selection:** Every new adventure begins with a choice between **Easy** (respawn at the latest boss checkpoint) and **Hard** (permadeath) modes.
 - **Vitality upgrades:** You now start too frail to challenge the first boss; collect coins and purchase at least **two Vitality Sigils** from the shop to unlock that battle. Later bosses demand even more sigils, so plan your farming routes.
+- **Safe exploration:** The first rings of rooms (and any area while a boss door is waiting) stay combat-focused rather than boss-gated, letting you grind coins and strength upgrades before you choose to advance on a guardian.
 - **Dungeon wards & healing:** Additional wards can be purchased to extend your dungeon health pool while keeping the original base hearts intact. Healing flasks remain for topping off between encounters.
 - **Scaling combat:** Defeating enemies increases your damage tier, and every conquered boss raises both their future health pools and your own heroic stats—keeping encounters tense right to the finale.
 
