@@ -593,12 +593,22 @@ public final class GameLauncher {
         ControlsProfile profile = settings.mutableControls();
         String message = "Explore the Ember Caverns, unlock sealed doors, and defeat guardians to recover " +
                 "lost relics.\n\n" +
-                String.format("Move: %s/%s/%s/%s\nShoot: %s\nReroll obstacles: %s\nPause & access menu: %s",
+                String.format(
+                        "Move: %s/%s/%s/%s\n" +
+                                "Shoot: %s\n" +
+                                "Dash (invulnerable burst): %s\n" +
+                                "Parry (reflect projectiles): %s\n" +
+                                "Special (ring/pulse): %s\n" +
+                                "Reroll obstacles: %s\n" +
+                                "Pause & access menu: %s",
                         key(profile, ControlAction.MOVE_UP),
                         key(profile, ControlAction.MOVE_DOWN),
                         key(profile, ControlAction.MOVE_LEFT),
                         key(profile, ControlAction.MOVE_RIGHT),
                         key(profile, ControlAction.SHOOT),
+                        key(profile, ControlAction.DASH),
+                        key(profile, ControlAction.PARRY),
+                        key(profile, ControlAction.SPECIAL),
                         key(profile, ControlAction.REROLL),
                         key(profile, ControlAction.PAUSE));
         JOptionPane.showMessageDialog(frame, message, "How to play", JOptionPane.INFORMATION_MESSAGE);

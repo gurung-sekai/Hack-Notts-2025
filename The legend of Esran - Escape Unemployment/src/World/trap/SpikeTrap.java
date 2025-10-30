@@ -11,6 +11,7 @@ public final class SpikeTrap extends BaseTrap {
         this.activeFraction = Math.max(0.1, Math.min(0.9, activeFraction));
         setDamage(2);
         setContactCooldown(0.55);
+        setIntegrity(2);
     }
 
     @Override
@@ -27,5 +28,10 @@ public final class SpikeTrap extends BaseTrap {
         double phase = elapsed % cycle;
         double threshold = cycle * activeFraction;
         active = phase >= threshold;
+    }
+
+    @Override
+    protected String damageSource() {
+        return "Spike trap";
     }
 }

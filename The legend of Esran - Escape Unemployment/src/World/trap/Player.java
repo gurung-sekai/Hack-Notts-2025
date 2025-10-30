@@ -9,7 +9,11 @@ public interface Player {
     Rectangle getBounds();
     boolean isInvulnerable();
     void grantInvulnerability(double seconds);
-    void takeDamage(int damage);
+    void takeDamage(int damage, String source);
+
+    default void takeDamage(int damage) {
+        takeDamage(damage, "trap");
+    }
 
     default void update(double dt) {
         // Optional hook for implementations that need to decay timers.

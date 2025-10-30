@@ -11,6 +11,7 @@ public final class FireVentTrap extends BaseTrap {
         this.burstDuration = Math.max(0.1, Math.min(this.burstEvery, Double.isFinite(burstDuration) ? burstDuration : 1.0));
         setDamage(3);
         setContactCooldown(0.6);
+        setIntegrity(3);
     }
 
     @Override
@@ -26,5 +27,10 @@ public final class FireVentTrap extends BaseTrap {
             animation().reset();
         }
         active = burning;
+    }
+
+    @Override
+    protected String damageSource() {
+        return "Fire vent";
     }
 }

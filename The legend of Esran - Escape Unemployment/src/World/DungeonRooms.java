@@ -109,16 +109,32 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private static final int MINIMAP_FOOTER = 92;
     private static final int MINIMAP_HORIZONTAL_PADDING = 12;
 
+    private static final int DASH_DURATION_TICKS = 12;
+    private static final int DASH_COOLDOWN_TICKS = 90;
+    private static final double DASH_SPEED = PLAYER_SPEED * 3.6;
+    private static final double DASH_INVUL_SECONDS = 0.25;
+    private static final int PARRY_WINDOW_TICKS = 18;
+    private static final int PARRY_COOLDOWN_TICKS = 120;
+    private static final int PARRY_FLASH_TICKS = 20;
+    private static final int SPECIAL_COOLDOWN_TICKS = 360;
+    private static final int COMBO_DECAY_TICKS = 180;
+    private static final int MAX_COMBO_LEVEL = 6;
+    private static final double COMBO_DAMAGE_STEP = 0.18;
+    private static final int PLAYER_SHOT_BASE_COOLDOWN = 14;
+    private static final int PLAYER_SHOT_MIN_COOLDOWN = 4;
+
     enum T { VOID, FLOOR, WALL, DOOR }
     enum Dir { N, S, W, E }
 
-    enum EnemyType { ZOMBIE, IMP, KNIGHT, OGRE, PUMPKIN, SKELETON, WIZARD }
+    enum EnemyType { ZOMBIE, IMP, KNIGHT, OGRE, PUMPKIN, SKELETON, WIZARD, NECROMANCER, BARD }
 
     enum WeaponType { CLAWS, SWORD, HAMMER, BOW, STAFF }
 
     enum ProjectileKind { ORB, ARROW }
 
     enum TrapKind { SAW, SPIKE, FIRE_VENT }
+
+    enum AreaAbility { FIRE_RING, LIGHTNING_PULSE }
 
     public enum Difficulty { EASY, HARD }
 
@@ -157,6 +173,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         double facingAngle = 0.0;
         double weaponAngle = 0.0;
         int coinReward = 0;
+        double damageMultiplier = 1.0;
+        double speedMultiplier = 1.0;
+        int buffTicks = 0;
+        int supportTicks = 0;
     }
 
     static class Bullet implements Serializable {
@@ -311,11 +331,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
 
         @Override
-        public void takeDamage(int damage) {
+        public void takeDamage(int damage, String source) {
             if (damage <= 0) {
                 return;
             }
-            applyPlayerDamage(damage);
+            applyTrapDamage(damage, source);
         }
 
         @Override
@@ -401,6 +421,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private static final int MAX_DUNGEON_HEART_UPGRADES = 6;
     private static final int MIN_EXPLORED_ROOMS_BEFORE_BOSS = 6;
     private static final int SAFE_RING_RADIUS = 3;
+    private static final int SAFE_ROOMS_BEFORE_TRAPS = 3;
     private static final int MIN_VITALITY_FOR_BOSS_SPAWN = 2;
     private static final int MAX_PENDING_BOSS_DOORS = 1;
     private static final int HEAL_FLASH_TICKS = FPS * 2;
@@ -487,6 +508,21 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private BossBattlePanel.BossKind checkpointBoss = null;
     private boolean gameOverShown = false;
 
+    private int dashTicks = 0;
+    private int dashCooldownTicks = 0;
+    private double dashDirX = 0.0;
+    private double dashDirY = 0.0;
+    private int parryWindowTicks = 0;
+    private int parryCooldownTicks = 0;
+    private int parryFlashTicks = 0;
+    private int specialCooldownTicks = 0;
+    private AreaAbility nextAreaAbility = AreaAbility.FIRE_RING;
+    private int comboCount = 0;
+    private int comboTimerTicks = 0;
+    private int comboLevel = 0;
+    private int playerShotCooldownTicks = 0;
+    private String lastDamageCause = "Unknown mishap";
+
     public DungeonRooms(GameSettings settings,
                         ControlsProfile controls,
                         LanguageBundle texts,
@@ -557,6 +593,20 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         checkpointRoom = new Point(worldPos);
         checkpointBoss = null;
         gameOverShown = false;
+        dashTicks = 0;
+        dashCooldownTicks = 0;
+        dashDirX = 0.0;
+        dashDirY = 0.0;
+        parryWindowTicks = 0;
+        parryCooldownTicks = 0;
+        parryFlashTicks = 0;
+        specialCooldownTicks = 0;
+        nextAreaAbility = AreaAbility.FIRE_RING;
+        comboCount = 0;
+        comboTimerTicks = 0;
+        comboLevel = 0;
+        playerShotCooldownTicks = 0;
+        lastDamageCause = "Unknown mishap";
         playerHP = playerMaxHp();
         iFrames = 0;
         playerDamageBuffer = 0.0;
@@ -626,6 +676,22 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemiesDefeated = Math.max(0, snapshot.enemiesDefeated());
         bossesDefeated = Math.max(0, snapshot.bossesDefeated());
         difficulty = snapshot.difficulty();
+        dashTicks = Math.max(0, snapshot.dashTicks());
+        dashCooldownTicks = Math.max(0, snapshot.dashCooldownTicks());
+        dashDirX = snapshot.dashDirX();
+        dashDirY = snapshot.dashDirY();
+        parryWindowTicks = Math.max(0, snapshot.parryWindowTicks());
+        parryCooldownTicks = Math.max(0, snapshot.parryCooldownTicks());
+        parryFlashTicks = Math.max(0, snapshot.parryFlashTicks());
+        specialCooldownTicks = Math.max(0, snapshot.specialCooldownTicks());
+        nextAreaAbility = snapshot.nextAreaAbility();
+        comboCount = Math.max(0, snapshot.comboCount());
+        comboTimerTicks = Math.max(0, snapshot.comboTimerTicks());
+        comboLevel = Math.max(0, Math.min(MAX_COMBO_LEVEL, snapshot.comboLevel()));
+        playerShotCooldownTicks = Math.max(0, snapshot.playerShotCooldownTicks());
+        lastDamageCause = snapshot.lastDamageCause() == null || snapshot.lastDamageCause().isBlank()
+                ? "Unknown mishap"
+                : snapshot.lastDamageCause();
         Point restoredCheckpoint = snapshot.checkpointRoom();
         checkpointRoom = restoredCheckpoint == null ? new Point(worldPos) : restoredCheckpoint;
         checkpointBoss = snapshot.checkpointBoss();
@@ -963,6 +1029,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case PUMPKIN -> new Color[]{new Color(224, 132, 40), new Color(90, 42, 8)};
             case SKELETON -> new Color[]{new Color(230, 230, 230), new Color(76, 86, 106)};
             case WIZARD -> new Color[]{new Color(120, 90, 200), new Color(40, 28, 70)};
+            case NECROMANCER -> new Color[]{new Color(96, 82, 180), new Color(24, 18, 60)};
+            case BARD -> new Color[]{new Color(90, 186, 198), new Color(22, 74, 86)};
         };
     }
 
@@ -975,6 +1043,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case PUMPKIN -> "resources/sprites/Pumpkin/pumpkin_dude_idle_anim_f";
             case SKELETON -> "resources/sprites/Skeleton/skelet_idle_anim_f";
             case WIZARD -> "resources/sprites/Wizard/wizzard_m_idle_anim_f";
+            case NECROMANCER -> "resources/sprites/Wizard/wizzard_m_idle_anim_f";
+            case BARD -> ENEMY_IDLE_PREFIX;
         };
     }
 
@@ -1016,6 +1086,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case WIZARD -> new String[]{
                     "/resources/sprites/Wizard/Idle",
                     "/resources/sprites/Wizard"
+            };
+            case NECROMANCER -> new String[]{
+                    "/resources/sprites/Wizard/Idle",
+                    "/resources/sprites/Wizard"
+            };
+            case BARD -> new String[]{
+                    "/resources/sprites/Imp/Idle",
+                    "/resources/sprites/Imp"
             };
         };
     }
@@ -1168,7 +1246,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (r == null || r.cleared) return;
         if (isBossRoom(pos)) return;
         if (!r.spawnsPrepared) {
-            initializeEnemySpawns(r);
+            initializeEnemySpawns(pos, r);
         }
         if (!r.enemies.isEmpty()) return;
 
@@ -1188,19 +1266,28 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             EnemyType.IMP,
             EnemyType.PUMPKIN,
             EnemyType.SKELETON,
-            EnemyType.WIZARD
+            EnemyType.WIZARD,
+            EnemyType.NECROMANCER,
+            EnemyType.BARD
+    );
+    private static final EnumSet<EnemyType> ARCHER_ENEMIES = EnumSet.of(
+            EnemyType.PUMPKIN,
+            EnemyType.SKELETON
     );
 
-    private void initializeEnemySpawns(Room r) {
+    private void initializeEnemySpawns(Point pos, Room r) {
         if (r == null || r.spawnsPrepared) return;
-        int base = 2 + Math.min(roomsVisited / 5, 2); // 2..4 based on progress
-        int variance = Math.min(roomsVisited / 6, 2);
-        int count = base + rng.nextInt(variance + 1);
+        boolean firstVisit = pos != null && (visited == null || !visited.contains(pos));
+        int explorationCount = roomsVisited + (firstVisit ? 1 : 0);
+        Random rngLocal = rng == null ? new Random() : rng;
+        int base = 2 + Math.min(explorationCount / 5, 2); // 2..4 based on progress
+        int variance = Math.min(explorationCount / 6, 2);
+        int count = base + rngLocal.nextInt(variance + 1);
         count = Math.max(2, Math.min(5, count));
         int attempts = 0;
         while (r.enemySpawns.size() < count && attempts++ < count * 40) {
-            int tx = 2 + rng.nextInt(COLS - 4);
-            int ty = 2 + rng.nextInt(ROWS - 4);
+            int tx = 2 + rngLocal.nextInt(COLS - 4);
+            int ty = 2 + rngLocal.nextInt(ROWS - 4);
             if (r.g[tx][ty] != T.FLOOR) continue;
             int px = tx * TILE + TILE / 2;
             int py = ty * TILE + TILE / 2;
@@ -1216,7 +1303,143 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             spawn.type = chooseEnemyTypeForRoom(r);
             r.enemySpawns.add(spawn);
         }
+        ensureEnemySynergies(r, explorationCount, rngLocal);
         r.spawnsPrepared = true;
+    }
+
+    private void ensureEnemySynergies(Room room, int explorationCount, Random random) {
+        if (room == null || room.enemySpawns == null || room.enemySpawns.isEmpty()) {
+            return;
+        }
+        Random rngLocal = random == null ? new Random() : random;
+        boolean hasArcher = false;
+        boolean hasKnight = false;
+        boolean hasNecromancer = false;
+        boolean hasBard = false;
+        int frontlineCount = 0;
+        for (EnemySpawn spawn : room.enemySpawns) {
+            if (spawn == null) {
+                continue;
+            }
+            if (spawn.type == null) {
+                spawn.type = EnemyType.ZOMBIE;
+            }
+            EnemyType type = spawn.type;
+            if (ARCHER_ENEMIES.contains(type)) {
+                hasArcher = true;
+            }
+            if (type == EnemyType.KNIGHT) {
+                hasKnight = true;
+            }
+            if (type == EnemyType.NECROMANCER) {
+                hasNecromancer = true;
+            }
+            if (type == EnemyType.BARD) {
+                hasBard = true;
+            }
+            if (type != EnemyType.NECROMANCER && type != EnemyType.BARD) {
+                frontlineCount++;
+            }
+        }
+
+        if (hasArcher && !hasKnight && explorationCount >= 4 &&
+                countSpawnedEnemies(room, EnemyType.KNIGHT) < perRoomLimit(EnemyType.KNIGHT)) {
+            EnemySpawn knight = createSupportSpawn(room, EnemyType.KNIGHT, rngLocal);
+            if (knight != null) {
+                room.enemySpawns.add(knight);
+                hasKnight = true;
+                frontlineCount++;
+            }
+        }
+
+        if (hasNecromancer && frontlineCount == 0) {
+            EnemyType filler = explorationCount >= 4 ? EnemyType.ZOMBIE : EnemyType.IMP;
+            if (countSpawnedEnemies(room, filler) < perRoomLimit(filler)) {
+                EnemySpawn revivedTarget = createSupportSpawn(room, filler, rngLocal);
+                if (revivedTarget != null) {
+                    room.enemySpawns.add(revivedTarget);
+                    frontlineCount++;
+                }
+            }
+        }
+
+        if (hasBard && frontlineCount <= 1) {
+            EnemyType partner = explorationCount >= 5 ? EnemyType.SKELETON : EnemyType.IMP;
+            if (countSpawnedEnemies(room, partner) < perRoomLimit(partner)) {
+                EnemySpawn ally = createSupportSpawn(room, partner, rngLocal);
+                if (ally != null) {
+                    room.enemySpawns.add(ally);
+                    frontlineCount++;
+                }
+            }
+        }
+    }
+
+    private int countSpawnedEnemies(Room room, EnemyType type) {
+        if (room == null || room.enemySpawns == null || type == null) {
+            return 0;
+        }
+        int count = 0;
+        for (EnemySpawn spawn : room.enemySpawns) {
+            if (spawn == null) {
+                continue;
+            }
+            EnemyType current = spawn.type == null ? EnemyType.ZOMBIE : spawn.type;
+            if (current == type) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private EnemySpawn createSupportSpawn(Room room, EnemyType type, Random random) {
+        if (room == null || type == null) {
+            return null;
+        }
+        Random rngLocal = random == null ? new Random() : random;
+        int attempts = 0;
+        while (attempts++ < 80) {
+            int tx = 2 + rngLocal.nextInt(COLS - 4);
+            int ty = 2 + rngLocal.nextInt(ROWS - 4);
+            if (room.g[tx][ty] != T.FLOOR) {
+                continue;
+            }
+            int px = tx * TILE + TILE / 2;
+            int py = ty * TILE + TILE / 2;
+            if (!isRectFree(room, px, py, (int) (TILE * 0.3))) {
+                continue;
+            }
+            if (nearAnyDoor(room, tx, ty, 2)) {
+                continue;
+            }
+            if (enemySpawnConflict(room.enemySpawns, px, py, TILE)) {
+                continue;
+            }
+            EnemySpawn spawn = new EnemySpawn();
+            spawn.x = px;
+            spawn.y = py;
+            spawn.type = type;
+            return spawn;
+        }
+        return null;
+    }
+
+    private boolean enemySpawnConflict(List<EnemySpawn> spawns, int px, int py, int minDistance) {
+        if (spawns == null || spawns.isEmpty()) {
+            return false;
+        }
+        int minSq = minDistance * minDistance;
+        for (EnemySpawn existing : spawns) {
+            if (existing == null) {
+                continue;
+            }
+            int dx = existing.x - px;
+            int dy = existing.y - py;
+            if (dx * dx + dy * dy < minSq) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void ensureRoomTheme(Room room) {
@@ -1412,12 +1635,23 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    private TrapKind chooseTrapKind(Random random, int depth) {
+    private TrapKind chooseTrapKind(Random random, int depth, int progress) {
         Random rngLocal = random == null ? new Random() : random;
-        if (depth < 4) {
+        if (progress <= 1) {
+            return TrapKind.SAW;
+        }
+        if (progress == 2) {
             return rngLocal.nextBoolean() ? TrapKind.SAW : TrapKind.SPIKE;
         }
-        TrapKind[] pool = depth < 6 ? new TrapKind[]{TrapKind.SAW, TrapKind.SPIKE} : TrapKind.values();
+        if (progress == 3) {
+            TrapKind[] pool = depth < 4
+                    ? new TrapKind[]{TrapKind.SAW, TrapKind.SPIKE, TrapKind.SPIKE}
+                    : new TrapKind[]{TrapKind.SAW, TrapKind.SPIKE, TrapKind.FIRE_VENT};
+            return pool[rngLocal.nextInt(pool.length)];
+        }
+        TrapKind[] pool = depth < 4
+                ? new TrapKind[]{TrapKind.SAW, TrapKind.SPIKE, TrapKind.SPIKE}
+                : new TrapKind[]{TrapKind.SAW, TrapKind.SPIKE, TrapKind.FIRE_VENT};
         return pool[rngLocal.nextInt(pool.length)];
     }
 
@@ -1432,14 +1666,25 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             room.trapSpawns.clear();
             return;
         }
-        Random rngLocal = random == null ? new Random() : random;
-        int depth = pos == null ? 0 : Math.abs(pos.x) + Math.abs(pos.y);
-        if (depth < 3 && roomsVisited < 6) {
+        boolean firstVisit = pos != null && (visited == null || !visited.contains(pos));
+        int explorationCount = roomsVisited + (firstVisit ? 1 : 0);
+        if (explorationCount <= SAFE_ROOMS_BEFORE_TRAPS) {
             return;
         }
-        int base = depth < 6 ? 1 : 2;
-        int variance = Math.max(1, depth / 3);
+        Random rngLocal = random == null ? new Random() : random;
+        int depth = pos == null ? 0 : Math.abs(pos.x) + Math.abs(pos.y);
+        int progress = Math.max(0, explorationCount - SAFE_ROOMS_BEFORE_TRAPS);
+        if (depth < 2 && progress < 2) {
+            return;
+        }
+        int base = Math.max(1, Math.min(2 + progress / 2, depth < 6 ? 2 : 3));
+        int variance = Math.max(1, Math.min(3, progress / 2 + Math.max(1, depth / 4)));
         int target = Math.min(4, base + rngLocal.nextInt(Math.max(1, variance)));
+        if (progress <= 1) {
+            target = Math.min(target, 1);
+        } else if (progress == 2) {
+            target = Math.min(target, 2);
+        }
         int attempts = 0;
         while (room.trapSpawns.size() < target && attempts++ < target * 40) {
             int tx = 1 + rngLocal.nextInt(COLS - 2);
@@ -1455,7 +1700,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             if (pickupConflict(room, candidate)) continue;
 
             RoomTrap trap = new RoomTrap();
-            trap.kind = chooseTrapKind(rngLocal, depth);
+            trap.kind = chooseTrapKind(rngLocal, depth, progress);
             trap.x = candidate.x;
             trap.y = candidate.y;
             trap.width = candidate.width;
@@ -1659,11 +1904,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private double playerDamage() {
-        return BASE_PLAYER_DAMAGE + damageLevel * DAMAGE_STEP;
+        double base = BASE_PLAYER_DAMAGE + damageLevel * DAMAGE_STEP;
+        double comboBonus = 1.0 + comboLevel * COMBO_DAMAGE_STEP;
+        return base * comboBonus;
     }
 
     private void registerEnemyDefeat() {
         enemiesDefeated++;
+        awardCombo(2);
         while (damageLevel < DAMAGE_THRESHOLDS.length && enemiesDefeated >= DAMAGE_THRESHOLDS[damageLevel]) {
             damageLevel++;
             showMessage("Your strikes grow stronger! (Power " + (damageLevel + 1) + ")");
@@ -1787,6 +2035,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case PUMPKIN -> (int) (TILE * 0.6);
             case SKELETON -> (int) (TILE * 0.62);
             case WIZARD -> (int) (TILE * 0.7);
+            case NECROMANCER -> (int) (TILE * 0.68);
+            case BARD -> (int) (TILE * 0.62);
         };
     }
 
@@ -1822,6 +2072,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 enemy.maxHealth = 4;
                 enemy.coinReward = 7 + rng.nextInt(4);
             }
+            case NECROMANCER -> {
+                enemy.maxHealth = 5;
+                enemy.coinReward = 8 + rng.nextInt(5);
+            }
+            case BARD -> {
+                enemy.maxHealth = 3;
+                enemy.coinReward = 6 + rng.nextInt(4);
+            }
         }
         enemy.health = enemy.maxHealth;
         enemy.damageBuffer = 0.0;
@@ -1832,6 +2090,10 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.bowDrawTicks = 0;
         enemy.weaponAngle = 0.0;
         enemy.facingAngle = 0.0;
+        enemy.damageMultiplier = 1.0;
+        enemy.speedMultiplier = 1.0;
+        enemy.buffTicks = 0;
+        enemy.supportTicks = 0;
     }
 
     private EnemyType chooseEnemyTypeForRoom(Room room) {
@@ -1915,9 +2177,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         if (roomsVisited >= 5) {
             types.add(EnemyType.WIZARD);
+            types.add(EnemyType.BARD);
         }
         if (roomsVisited >= 6) {
             types.add(EnemyType.OGRE);
+        }
+        if (roomsVisited >= 7) {
+            types.add(EnemyType.NECROMANCER);
         }
         return types;
     }
@@ -1929,6 +2195,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case WIZARD -> roomsVisited >= 8 ? 2 : 1;
             case KNIGHT -> roomsVisited >= 7 ? 2 : 1;
             case OGRE -> 1 + roomsVisited / 12;
+            case NECROMANCER -> roomsVisited >= 9 ? 2 : 1;
+            case BARD -> 2;
         };
     }
 
@@ -1941,6 +2209,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case KNIGHT -> roomsVisited >= 6 ? 2 : 1;
             case WIZARD -> roomsVisited >= 7 ? 2 : 1;
             case OGRE -> roomsVisited >= 8 ? 2 : 1;
+            case NECROMANCER -> roomsVisited >= 9 ? 2 : 1;
+            case BARD -> roomsVisited >= 5 ? 2 : 1;
         };
     }
 
@@ -1950,6 +2220,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             case OGRE -> WeaponType.HAMMER;
             case PUMPKIN, SKELETON -> WeaponType.BOW;
             case WIZARD -> WeaponType.STAFF;
+            case NECROMANCER -> WeaponType.STAFF;
+            case BARD -> WeaponType.STAFF;
             case IMP -> WeaponType.CLAWS;
         };
     }
@@ -2006,6 +2278,17 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         if (enemy.braceTicks > 0) {
             enemy.braceTicks--;
+        }
+
+        if (enemy.buffTicks > 0) {
+            enemy.buffTicks--;
+            if (enemy.buffTicks <= 0) {
+                enemy.damageMultiplier = 1.0;
+                enemy.speedMultiplier = 1.0;
+            }
+        } else {
+            enemy.damageMultiplier = Math.max(1.0, enemy.damageMultiplier);
+            enemy.speedMultiplier = Math.max(1.0, enemy.speedMultiplier);
         }
 
         boolean preppingHeavy = enemy.type == EnemyType.OGRE && enemy.windup > 0;
@@ -2067,7 +2350,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     enemy.windup--;
                     if (enemy.windup == 0) {
                         if (player != null && intersectsCircleRect(enemy.x, enemy.y, TILE * 1.2, player)) {
-                            applyPlayerDamage(2.0);
+                            applyPlayerDamage(2.0 * enemy.damageMultiplier, "Ogre shockwave");
                         }
                         explosions.add(makeExplosion(enemy.x, enemy.y, 24, 36,
                                 new Color(255, 156, 110), new Color(255, 216, 170)));
@@ -2133,6 +2416,55 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     enemy.cd = 80 + rng.nextInt(40);
                 }
             }
+            case NECROMANCER -> {
+                double minRange = TILE * 4.8;
+                double maxRange = TILE * 7.6;
+                if (distance < minRange) {
+                    moveEnemyAway(enemy, pcx, pcy, 0.74);
+                } else if (distance > maxRange) {
+                    moveEnemyToward(enemy, pcx, pcy, 0.62);
+                } else {
+                    strafeEnemy(enemy, pcx, pcy, 0.6, (enemy.patternIndex & 1) == 0);
+                }
+                if (enemy.supportTicks > 0) {
+                    enemy.supportTicks--;
+                }
+                if (enemy.cd <= 0) {
+                    if (enemy.supportTicks <= 0 && attemptResurrection(enemy)) {
+                        enemy.cd = 140;
+                        enemy.supportTicks = 200;
+                        enemy.weaponAngle = angleToPlayer;
+                    } else if (hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                        enemy.weaponAngle = angleToPlayer;
+                        spawnEnemyProjectileAngle(enemy, angleToPlayer, 3.4, 1.3 * enemy.damageMultiplier, 6, false,
+                                new Color(180, 140, 240), true, 28, 24);
+                        enemy.cd = 70 + rng.nextInt(30);
+                    }
+                }
+            }
+            case BARD -> {
+                double orbit = TILE * (3.2 + (enemy.patternIndex & 1));
+                if (distance < orbit) {
+                    moveEnemyAway(enemy, pcx, pcy, 0.66);
+                } else if (distance > orbit + TILE) {
+                    moveEnemyToward(enemy, pcx, pcy, 0.6);
+                } else {
+                    strafeEnemy(enemy, pcx, pcy, 0.58, (enemy.patternIndex & 1) == 1);
+                }
+                if (enemy.supportTicks > 0) {
+                    enemy.supportTicks--;
+                }
+                if (enemy.supportTicks <= 0) {
+                    empowerAllies(enemy);
+                    enemy.supportTicks = 180;
+                }
+                enemy.weaponAngle = angleToPlayer;
+                if (enemy.cd <= 0 && hasLineOfSight(enemy.x, enemy.y, pcx, pcy)) {
+                    spawnEnemyProjectile(enemy, pcx, pcy, 3.2, 0.9, 5, false,
+                            new Color(200, 240, 160), false, 0, 0);
+                    enemy.cd = 90 + rng.nextInt(40);
+                }
+            }
         }
     }
 
@@ -2164,10 +2496,48 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     continue;
                 }
             }
+            if (b.friendly) {
+                boolean consumed = false;
+                TrapManager traps = trapManagerForRoom(room);
+                if (traps != null && traps.damageTrap(b.x, b.y, Math.max(1.0, b.damage))) {
+                    consumed = true;
+                    awardCombo(1);
+                }
+                if (!consumed && room != null && room.enemies != null) {
+                    for (RoomEnemy enemy : room.enemies) {
+                        if (enemy == null || !enemy.alive) {
+                            continue;
+                        }
+                        int ex0 = enemy.x - enemy.size / 2;
+                        int ey0 = enemy.y - enemy.size / 2;
+                        int ex1 = ex0 + enemy.size;
+                        int ey1 = ey0 + enemy.size;
+                        if (b.x >= ex0 && b.x <= ex1 && b.y >= ey0 && b.y <= ey1) {
+                            applyDamageToEnemy(enemy, Math.max(1.0, b.damage));
+                            consumed = true;
+                            awardCombo(2);
+                            break;
+                        }
+                    }
+                }
+                if (consumed) {
+                    b.alive = false;
+                    resolveBulletImpact(b);
+                }
+                continue;
+            }
+
             if (player != null && intersectsCircleRect(b.x, b.y, Math.max(2, b.r), player)) {
-                applyPlayerDamage(b.damage);
-                b.alive = false;
-                resolveBulletImpact(b);
+                if (parryWindowTicks > 0) {
+                    reflectProjectile(b, pcx, pcy);
+                    parryWindowTicks = 0;
+                    parryFlashTicks = PARRY_FLASH_TICKS;
+                    awardCombo(2);
+                } else {
+                    applyPlayerDamage(b.damage, projectileCause(b));
+                    b.alive = false;
+                    resolveBulletImpact(b);
+                }
             }
         }
         bullets.removeIf(bb -> !bb.alive);
@@ -2201,6 +2571,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                     continue;
                 }
             }
+            TrapManager traps = trapManagerForRoom(room);
+            if (traps != null && traps.damageTrap(b.x, b.y, b.damage)) {
+                b.alive = false;
+                resolvePlayerProjectileImpact(b);
+                awardCombo(1);
+                continue;
+            }
             for (RoomEnemy enemy : room.enemies) {
                 if (!enemy.alive || !b.alive) {
                     continue;
@@ -2212,6 +2589,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 if (b.x >= ex0 && b.x <= ex1 && b.y >= ey0 && b.y <= ey1) {
                     b.alive = false;
                     resolvePlayerProjectileImpact(b);
+                    awardCombo(1);
                     applyDamageToEnemy(enemy, b.damage);
                 }
             }
@@ -2241,7 +2619,16 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         if (player != null && intersectsCircleRect(enemy.x, enemy.y, range, player)) {
-            applyPlayerDamage(damage);
+            String cause = switch (enemy.type) {
+                case KNIGHT -> "Knight slash";
+                case OGRE -> "Ogre smash";
+                case ZOMBIE -> "Zombie swipe";
+                case IMP -> "Imp claws";
+                case NECROMANCER -> "Necromancer touch";
+                case BARD -> "Enchanted baton";
+                default -> "Enemy strike";
+            };
+            applyPlayerDamage(damage * enemy.damageMultiplier, cause);
             enemy.cd = cooldown;
             triggerMeleeSwing(enemy);
         }
@@ -2254,7 +2641,6 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 angle = computed;
             }
         }
-        enemy.weapon = WeaponType.STAFF;
         enemy.weaponAngle = angle;
         enemy.attackAnimDuration = 20;
         enemy.attackAnimTicks = 20;
@@ -2294,7 +2680,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         enemy.attackAnimTicks = 20;
     }
 
-    private void applyPlayerDamage(double damage) {
+    private void applyPlayerDamage(double damage, String cause) {
         if (player == null || damage <= 0) {
             return;
         }
@@ -2309,9 +2695,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         playerDamageBuffer -= whole;
         playerHP = Math.max(0, playerHP - whole);
         iFrames = 40;
+        lastDamageCause = (cause == null || cause.isBlank()) ? "Unknown danger" : cause;
+        resetCombo();
         if (playerHP <= 0) {
             onPlayerDeath();
         }
+    }
+
+    private void applyTrapDamage(int damage, String source) {
+        if (damage <= 0) {
+            return;
+        }
+        applyPlayerDamage(damage, source == null || source.isBlank() ? "Trap" : source);
     }
 
     private void applyDamageToEnemy(RoomEnemy enemy, double damage) {
@@ -2336,19 +2731,20 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private void moveEnemyToward(RoomEnemy enemy, int targetX, int targetY, double speed) {
         double dx = targetX - enemy.x;
         double dy = targetY - enemy.y;
+        double adjustedSpeed = speed * (enemy == null ? 1.0 : enemy.speedMultiplier);
         double len = Math.hypot(dx, dy);
         if (len < 1e-6) {
             return;
         }
         double normX = dx / len;
         double normY = dy / len;
-        int mx = (int) Math.round(normX * speed);
-        int my = (int) Math.round(normY * speed);
-        if (mx == 0 && Math.abs(speed) >= 0.45) {
-            mx = speed >= 0 ? (normX >= 0 ? 1 : -1) : (normX >= 0 ? -1 : 1);
+        int mx = (int) Math.round(normX * adjustedSpeed);
+        int my = (int) Math.round(normY * adjustedSpeed);
+        if (mx == 0 && Math.abs(adjustedSpeed) >= 0.45) {
+            mx = adjustedSpeed >= 0 ? (normX >= 0 ? 1 : -1) : (normX >= 0 ? -1 : 1);
         }
-        if (my == 0 && Math.abs(speed) >= 0.45) {
-            my = speed >= 0 ? (normY >= 0 ? 1 : -1) : (normY >= 0 ? -1 : 1);
+        if (my == 0 && Math.abs(adjustedSpeed) >= 0.45) {
+            my = adjustedSpeed >= 0 ? (normY >= 0 ? 1 : -1) : (normY >= 0 ? -1 : 1);
         }
         if (mx != 0) {
             attemptEnemyMove(enemy, mx, 0);
@@ -2365,18 +2761,19 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private void strafeEnemy(RoomEnemy enemy, int targetX, int targetY, double speed, boolean clockwise) {
         double dx = targetX - enemy.x;
         double dy = targetY - enemy.y;
+        double adjustedSpeed = speed * (enemy == null ? 1.0 : enemy.speedMultiplier);
         double len = Math.hypot(dx, dy);
         if (len < 1e-6) {
             return;
         }
         double sx = clockwise ? dy / len : -dy / len;
         double sy = clockwise ? -dx / len : dx / len;
-        int mx = (int) Math.round(sx * speed);
-        int my = (int) Math.round(sy * speed);
-        if (mx == 0 && Math.abs(speed) >= 0.45) {
+        int mx = (int) Math.round(sx * adjustedSpeed);
+        int my = (int) Math.round(sy * adjustedSpeed);
+        if (mx == 0 && Math.abs(adjustedSpeed) >= 0.45) {
             mx = sx >= 0 ? 1 : -1;
         }
-        if (my == 0 && Math.abs(speed) >= 0.45) {
+        if (my == 0 && Math.abs(adjustedSpeed) >= 0.45) {
             my = sy >= 0 ? 1 : -1;
         }
         if (mx != 0) {
@@ -2440,7 +2837,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         double angle = Math.atan2(targetY - shooter.y, targetX - shooter.x);
-        spawnEnemyProjectileAngle(shooter, angle, speed, damage, radius, useTexture, tint, explosive, explosionRadius, explosionLife);
+        spawnEnemyProjectileAngle(shooter, angle, speed, damage * shooter.damageMultiplier, radius,
+                useTexture, tint, explosive, explosionRadius, explosionLife);
     }
 
     private void spawnEnemyProjectileAngle(RoomEnemy shooter, double angle, double speed, double damage,
@@ -2783,8 +3181,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             if (difficulty == Difficulty.HARD) {
                 if (!gameOverShown) {
                     gameOverShown = true;
+                    String causeLine = (lastDamageCause == null || lastDamageCause.isBlank())
+                            ? ""
+                            : "\nCause: " + lastDamageCause;
                     JOptionPane.showMessageDialog(DungeonRooms.this,
-                            "Your adventure ends here.",
+                            "Your adventure ends here." + causeLine,
                             "Game Over",
                             JOptionPane.INFORMATION_MESSAGE);
                 }
@@ -2906,6 +3307,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void shootPlayerBullet() {
+        if (playerShotCooldownTicks > 0 || player == null) {
+            return;
+        }
         Bullet b = new Bullet();
         int pcx = player.x + player.width/2;
         int pcy = player.y + player.height/2;
@@ -2913,7 +3317,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         double dx = mouseX - pcx;
         double dy = mouseY - pcy;
         double l = Math.max(1e-6, Math.hypot(dx, dy));
-        double spd = 7.0;
+        double spd = 7.0 + comboLevel * 0.4;
         b.vx = dx / l * spd;
         b.vy = dy / l * spd;
         b.r = PLAYER_PROJECTILE_RADIUS;
@@ -2922,6 +3326,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         b.maxLife = 360;
         b.useTexture = true;
         playerBullets.add(b);
+        playerShotCooldownTicks = Math.max(PLAYER_SHOT_MIN_COOLDOWN,
+                PLAYER_SHOT_BASE_COOLDOWN - comboLevel * 2);
     }
 
     // ---- file-system sprite loading ----
@@ -3107,6 +3513,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         animTick++;
         if (iFrames > 0) iFrames--;
         if (healTicks > 0) healTicks--;
+        tickAbilityTimers();
         updatePlayer();
         updateTraps();
         updateCombat();
@@ -3122,21 +3529,320 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private void updatePlayer() {
-        // No diagonal movement: pick one axis
-        int vx = 0, vy = 0;
-        if (left || right) {
-            vx = (left ? -PLAYER_SPEED : 0) + (right ? PLAYER_SPEED : 0);
-            vy = 0;
-        } else if (up || down) {
-            vy = (up ? -PLAYER_SPEED : 0) + (down ? PLAYER_SPEED : 0);
-            vx = 0;
+        if (dashTicks > 0) {
+            int dx = (int) Math.round(dashDirX * DASH_SPEED);
+            int dy = (int) Math.round(dashDirY * DASH_SPEED);
+            moveAxis(dx, 0);
+            moveAxis(0, dy);
+            trapPlayer.grantInvulnerability(DASH_INVUL_SECONDS);
+        } else {
+            int vx = 0, vy = 0;
+            if (left || right) {
+                vx = (left ? -PLAYER_SPEED : 0) + (right ? PLAYER_SPEED : 0);
+                vy = 0;
+            } else if (up || down) {
+                vy = (up ? -PLAYER_SPEED : 0) + (down ? PLAYER_SPEED : 0);
+                vx = 0;
+            }
+            moveAxis(vx, 0);
+            moveAxis(0, vy);
         }
-
-        moveAxis(vx, 0);
-        moveAxis(0, vy);
 
         Dir through = touchingDoorOnEdge();
         if (through != null) switchRoom(through);
+    }
+
+    private void tickAbilityTimers() {
+        if (dashTicks > 0) {
+            dashTicks--;
+            if (dashTicks == 0) {
+                dashDirX = 0.0;
+                dashDirY = 0.0;
+            }
+        }
+        if (dashCooldownTicks > 0) {
+            dashCooldownTicks--;
+        }
+        if (parryWindowTicks > 0) {
+            parryWindowTicks--;
+        }
+        if (parryCooldownTicks > 0) {
+            parryCooldownTicks--;
+        }
+        if (parryFlashTicks > 0) {
+            parryFlashTicks--;
+        }
+        if (specialCooldownTicks > 0) {
+            specialCooldownTicks--;
+        }
+        if (playerShotCooldownTicks > 0) {
+            playerShotCooldownTicks--;
+        }
+        if (comboCount > 0) {
+            if (comboTimerTicks > 0) {
+                comboTimerTicks--;
+            } else {
+                comboCount = Math.max(0, comboCount - 1);
+                comboTimerTicks = COMBO_DECAY_TICKS / 2;
+                updateComboLevel();
+            }
+        } else {
+            comboTimerTicks = 0;
+            updateComboLevel();
+        }
+    }
+
+    private void updateComboLevel() {
+        int newLevel = Math.min(MAX_COMBO_LEVEL, Math.max(0, comboCount) / 4);
+        if (newLevel != comboLevel) {
+            int previous = comboLevel;
+            comboLevel = newLevel;
+            if (comboLevel > previous && comboLevel > 0) {
+                showMessage("Combo level " + comboLevel + "!");
+            }
+        }
+    }
+
+    private void awardCombo(int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        comboCount = Math.max(0, comboCount + amount);
+        comboTimerTicks = COMBO_DECAY_TICKS;
+        updateComboLevel();
+    }
+
+    private void resetCombo() {
+        if (comboCount == 0) {
+            return;
+        }
+        comboCount = 0;
+        comboTimerTicks = 0;
+        updateComboLevel();
+    }
+
+    private void startDash() {
+        if (dashCooldownTicks > 0 || dashTicks > 0 || player == null) {
+            return;
+        }
+        double dirX = (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0);
+        double dirY = (down ? 1.0 : 0.0) - (up ? 1.0 : 0.0);
+        if (Math.abs(dirX) < 1e-4 && Math.abs(dirY) < 1e-4) {
+            int pcx = player.x + player.width / 2;
+            int pcy = player.y + player.height / 2;
+            dirX = mouseX - pcx;
+            dirY = mouseY - pcy;
+        }
+        if (Math.abs(dirX) < 1e-4 && Math.abs(dirY) < 1e-4) {
+            dirY = -1.0;
+        }
+        double len = Math.hypot(dirX, dirY);
+        if (len < 1e-4) {
+            dirX = 1.0;
+            dirY = 0.0;
+            len = 1.0;
+        }
+        dashDirX = dirX / len;
+        dashDirY = dirY / len;
+        dashTicks = DASH_DURATION_TICKS;
+        dashCooldownTicks = DASH_COOLDOWN_TICKS;
+        trapPlayer.grantInvulnerability(DASH_INVUL_SECONDS);
+        iFrames = Math.max(iFrames, (int) Math.ceil(DASH_INVUL_SECONDS / tickSeconds()));
+    }
+
+    private void startParry() {
+        if (parryCooldownTicks > 0 || parryWindowTicks > 0) {
+            return;
+        }
+        parryWindowTicks = PARRY_WINDOW_TICKS;
+        parryCooldownTicks = PARRY_COOLDOWN_TICKS;
+        parryFlashTicks = PARRY_FLASH_TICKS;
+        trapPlayer.grantInvulnerability(tickSeconds() * PARRY_WINDOW_TICKS / 2.0);
+    }
+
+    private void activateAreaAbility() {
+        if (specialCooldownTicks > 0 || room == null || player == null) {
+            return;
+        }
+        int baseCooldown = Math.max(90, SPECIAL_COOLDOWN_TICKS - comboLevel * 40);
+        specialCooldownTicks = baseCooldown;
+        int pcx = player.x + player.width / 2;
+        int pcy = player.y + player.height / 2;
+        switch (nextAreaAbility) {
+            case FIRE_RING -> {
+                double radius = TILE * (2.6 + comboLevel * 0.45);
+                applyFireRing(pcx, pcy, radius);
+                nextAreaAbility = AreaAbility.LIGHTNING_PULSE;
+            }
+            case LIGHTNING_PULSE -> {
+                applyLightningPulse(pcx, pcy);
+                nextAreaAbility = AreaAbility.FIRE_RING;
+            }
+        }
+    }
+
+    private void applyFireRing(int pcx, int pcy, double radius) {
+        explosions.add(makeExplosion(pcx, pcy, 26, (int) Math.round(radius),
+                new Color(255, 150, 90), new Color(255, 220, 150)));
+        double radiusSq = radius * radius;
+        if (room != null && room.enemies != null) {
+            for (RoomEnemy enemy : room.enemies) {
+                if (enemy == null || !enemy.alive) {
+                    continue;
+                }
+                double dx = enemy.x - pcx;
+                double dy = enemy.y - pcy;
+                if (dx * dx + dy * dy <= radiusSq) {
+                    applyDamageToEnemy(enemy, playerDamage() * (1.2 + comboLevel * 0.2));
+                    enemy.cd += 18;
+                    awardCombo(1);
+                }
+            }
+        }
+        TrapManager traps = trapManagerForRoom(room);
+        if (traps != null) {
+            int samples = 12;
+            for (int i = 0; i < samples; i++) {
+                double angle = (Math.PI * 2.0 * i) / samples;
+                double sx = pcx + Math.cos(angle) * radius;
+                double sy = pcy + Math.sin(angle) * radius;
+                if (traps.damageTrap(sx, sy, playerDamage())) {
+                    awardCombo(1);
+                }
+            }
+        }
+    }
+
+    private void applyLightningPulse(int pcx, int pcy) {
+        if (room == null || room.enemies == null) {
+            return;
+        }
+        int limit = Math.min(room.enemies.size(), 2 + comboLevel);
+        Set<RoomEnemy> targeted = new HashSet<>();
+        for (int i = 0; i < limit; i++) {
+            RoomEnemy best = null;
+            double bestDist = Double.MAX_VALUE;
+            for (RoomEnemy candidate : room.enemies) {
+                if (candidate == null || !candidate.alive || targeted.contains(candidate)) {
+                    continue;
+                }
+                double dist = distanceSq(candidate.x, candidate.y, pcx, pcy);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = candidate;
+                }
+            }
+            if (best == null) {
+                break;
+            }
+            targeted.add(best);
+            applyDamageToEnemy(best, playerDamage() * (1.4 + comboLevel * 0.25));
+            best.cd += 40;
+            best.braceTicks = Math.max(best.braceTicks, 24);
+            explosions.add(makeExplosion(best.x, best.y, 20, 28,
+                    new Color(150, 210, 255), new Color(90, 150, 230)));
+            awardCombo(2);
+        }
+    }
+
+    private double distanceSq(double ax, double ay, double bx, double by) {
+        double dx = ax - bx;
+        double dy = ay - by;
+        return dx * dx + dy * dy;
+    }
+
+    private void reflectProjectile(Bullet b, int pcx, int pcy) {
+        if (b == null) {
+            return;
+        }
+        double dirX = mouseX - pcx;
+        double dirY = mouseY - pcy;
+        if (Math.abs(dirX) < 1e-4 && Math.abs(dirY) < 1e-4) {
+            dirX = dashDirX;
+            dirY = dashDirY;
+        }
+        if (Math.abs(dirX) < 1e-4 && Math.abs(dirY) < 1e-4) {
+            dirX = -b.vx;
+            dirY = -b.vy;
+        }
+        double len = Math.hypot(dirX, dirY);
+        if (len < 1e-4) {
+            dirX = 1.0;
+            dirY = 0.0;
+            len = 1.0;
+        }
+        double speed = Math.max(4.5, Math.hypot(b.vx, b.vy)) + comboLevel * 0.4;
+        b.vx = dirX / len * speed;
+        b.vy = dirY / len * speed;
+        b.friendly = true;
+        b.damage = Math.max(b.damage, playerDamage() * 1.1);
+        b.life = 0;
+        b.tint = new Color(190, 230, 255);
+        b.kind = ProjectileKind.ORB;
+    }
+
+    private String projectileCause(Bullet b) {
+        if (b == null) {
+            return "Projectile";
+        }
+        if (b.explosive) {
+            return "Explosive orb";
+        }
+        return switch (b.kind) {
+            case ARROW -> "Arrow";
+            case ORB -> "Arcane bolt";
+        };
+    }
+
+    private boolean attemptResurrection(RoomEnemy necromancer) {
+        if (room == null || room.enemySpawns == null || necromancer == null) {
+            return false;
+        }
+        List<EnemySpawn> corpses = new ArrayList<>();
+        for (EnemySpawn spawn : room.enemySpawns) {
+            if (spawn == null || !spawn.defeated) {
+                continue;
+            }
+            if (spawn.type == EnemyType.NECROMANCER) {
+                continue;
+            }
+            corpses.add(spawn);
+        }
+        if (corpses.isEmpty()) {
+            return false;
+        }
+        EnemySpawn target = corpses.get(rng.nextInt(corpses.size()));
+        target.defeated = false;
+        RoomEnemy revived = instantiateEnemyFromSpawn(target);
+        revived.x = target.x;
+        revived.y = target.y;
+        revived.health = Math.max(1, revived.maxHealth - 1);
+        revived.damageMultiplier = 1.0;
+        revived.speedMultiplier = 1.0;
+        revived.buffTicks = 0;
+        revived.supportTicks = 0;
+        room.enemies.add(revived);
+        explosions.add(makeExplosion(target.x, target.y, 22, 28,
+                new Color(180, 150, 255), new Color(130, 100, 220)));
+        showMessage("A necromancer resurrects a foe!");
+        return true;
+    }
+
+    private void empowerAllies(RoomEnemy bard) {
+        if (room == null || room.enemies == null || bard == null) {
+            return;
+        }
+        for (RoomEnemy ally : room.enemies) {
+            if (ally == null || ally == bard || !ally.alive) {
+                continue;
+            }
+            ally.buffTicks = Math.max(ally.buffTicks, 180);
+            ally.damageMultiplier = Math.min(ally.damageMultiplier + 0.25, 2.0);
+            ally.speedMultiplier = Math.min(ally.speedMultiplier + 0.2, 1.8);
+        }
+        explosions.add(makeExplosion(bard.x, bard.y, 18, 24,
+                new Color(210, 255, 180), new Color(160, 220, 150)));
+        showMessage("A bard inspires the enemies!");
     }
 
     private void updateTraps() {
@@ -3841,7 +4547,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private void drawClawsPrimitive(Graphics2D gg, RoomEnemy enemy, double angle, int offset) {
         AffineTransform original = gg.getTransform();
         gg.translate(enemy.x, enemy.y);
-        gg.rotate(angle);
+        gg.rotate(angle + weaponOrientationOffset(WeaponType.CLAWS));
         int clawLength = Math.max(14, TILE / 2);
         int clawWidth = Math.max(3, TILE / 10);
         gg.setColor(new Color(210, 210, 225));
@@ -3859,7 +4565,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         AffineTransform original = gg.getTransform();
         gg.translate(enemy.x, enemy.y);
-        gg.rotate(angle);
+        gg.rotate(angle + weaponOrientationOffset(WeaponType.SWORD));
         gg.setColor(new Color(200, 210, 230));
         gg.fillRoundRect(offset, -bladeWidth / 2, bladeLength, bladeWidth, bladeWidth, bladeWidth);
         gg.setColor(new Color(160, 170, 190));
@@ -3878,7 +4584,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         AffineTransform original = gg.getTransform();
         gg.translate(enemy.x, enemy.y);
-        gg.rotate(angle);
+        gg.rotate(angle + weaponOrientationOffset(WeaponType.HAMMER));
         gg.setColor(new Color(94, 62, 32));
         gg.fillRoundRect(offset - 4, -handleWidth / 2, handleLength, handleWidth, handleWidth, handleWidth);
         gg.setColor(new Color(60, 40, 24));
@@ -3955,7 +4661,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         AffineTransform original = gg.getTransform();
         gg.translate(enemy.x, enemy.y);
-        gg.rotate(angle);
+        gg.rotate(angle + weaponOrientationOffset(WeaponType.BOW));
         gg.setColor(new Color(80, 60, 120));
         gg.fillRoundRect(offset - 4, -staffWidth / 2, staffLength, staffWidth, staffWidth, staffWidth);
         int orbX = offset + staffLength - orbRadius * 2;
@@ -4003,12 +4709,33 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         gg.translate(enemy.x, enemy.y);
         gg.rotate(angle);
         gg.translate(offset, 0);
+        double orientation = weaponOrientationOffset(type);
+        if (Math.abs(orientation) > 1e-6) {
+            gg.rotate(orientation);
+        }
         gg.drawImage(sprite, 0, -sprite.getHeight() / 2, null);
         if (overlay != null) {
             overlay.draw(gg, sprite, enemy);
         }
         gg.setTransform(original);
         return true;
+    }
+
+    private double weaponOrientationOffset(WeaponType type) {
+        if (type == null) {
+            return 0.0;
+        }
+        double fallback = switch (type) {
+            case CLAWS -> 0.0;
+            case SWORD, HAMMER, BOW, STAFF -> -Math.PI / 2.0;
+        };
+        if (weaponTextures != null) {
+            BufferedImage base = weaponTextures.get(type);
+            if (base != null && base.getWidth() >= base.getHeight()) {
+                return 0.0;
+            }
+        }
+        return fallback;
     }
 
     private BufferedImage scaledWeaponSprite(WeaponType type, int targetLongEdge) {
@@ -4123,6 +4850,25 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 keyName(ControlAction.REROLL),
                 keyName(ControlAction.PAUSE));
         infoLines.add(actionLine.toUpperCase(Locale.ENGLISH));
+
+        String abilityLine = String.format("DASH: %s   PARRY: %s",
+                abilityChargeText(dashTicks, dashCooldownTicks, DASH_COOLDOWN_TICKS),
+                abilityChargeText(parryWindowTicks, parryCooldownTicks, PARRY_COOLDOWN_TICKS));
+        infoLines.add(abilityLine.toUpperCase(Locale.ENGLISH));
+
+        String burstName = nextAreaAbility == AreaAbility.FIRE_RING ? "FIRE" : "LIGHTNING";
+        String specialLine = String.format("BURST: %s   NEXT: %s",
+                abilityChargeText(0, specialCooldownTicks, SPECIAL_COOLDOWN_TICKS),
+                burstName);
+        infoLines.add(specialLine.toUpperCase(Locale.ENGLISH));
+
+        int comboBonus = (int) Math.round(comboLevel * COMBO_DAMAGE_STEP * 100);
+        String comboLine = String.format("COMBO: %d   POWER: +%d%%", Math.max(0, comboLevel), comboBonus);
+        infoLines.add(comboLine.toUpperCase(Locale.ENGLISH));
+
+        if (lastDamageCause != null && !lastDamageCause.isBlank()) {
+            infoLines.add(("LAST HIT: " + lastDamageCause).toUpperCase(Locale.ENGLISH));
+        }
         String story = texts.text("story");
         if (story != null && !story.isBlank()) {
             infoLines.add(story.toUpperCase(Locale.ENGLISH));
@@ -4153,6 +4899,29 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
         Rectangle minimapArea = drawMinimap(overlay);
 
+        String bossHint = nextBossHint();
+        if (bossHint != null && !bossHint.isBlank()) {
+            String hintText = bossHint.toUpperCase(Locale.ENGLISH);
+            int maxWidth = Math.min(getWidth() - 20, 360);
+            int hintContentWidth = maxWidth - padding * 2;
+            int lines = Math.max(1, estimateParagraphLines(fm, hintText, hintContentWidth));
+            int hintHeight = padding * 2 + lines * lineHeight;
+            int hintX = getWidth() - maxWidth - 10;
+            int hintY;
+            if (minimapArea != null) {
+                hintY = minimapArea.y + minimapArea.height + 12;
+                if (hintY + hintHeight > getHeight() - 20) {
+                    hintY = Math.max(infoBox.y + infoBox.height + 12, 10);
+                }
+            } else {
+                hintY = infoBox.y + infoBox.height + 12;
+            }
+            Rectangle hintBox = new Rectangle(hintX, hintY, maxWidth, hintHeight);
+            DialogueText.paintFrame(overlay, hintBox, 18);
+            int hintBaseline = hintBox.y + padding + fm.getAscent();
+            DialogueText.drawParagraph(overlay, hintText, hintBox.x + padding, hintBaseline, hintContentWidth);
+        }
+
         if (!statusMessage.isBlank()) {
             int baseWidth = getWidth() - 20;
             int boxX = 10;
@@ -4174,6 +4943,117 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             DialogueText.drawParagraph(overlay, statusMessage.toUpperCase(Locale.ENGLISH),
                     statusBox.x + padding, messageY, statusBox.width - padding * 2);
         }
+    }
+
+    private String abilityChargeText(int activeTicks, int cooldownTicks, int maxCooldownTicks) {
+        if (activeTicks > 0) {
+            return "ACTIVE";
+        }
+        if (cooldownTicks <= 0) {
+            return "READY";
+        }
+        double seconds = cooldownTicks * tickSeconds();
+        if (seconds >= 10.0) {
+            return String.format(Locale.ENGLISH, "%.0fs", seconds);
+        }
+        return String.format(Locale.ENGLISH, "%.1fs", seconds);
+    }
+
+    private String nextBossHint() {
+        if (worldPos == null) {
+            return null;
+        }
+        BossEncounter nearestEncounter = null;
+        Point nearestPoint = null;
+        int nearestDistance = Integer.MAX_VALUE;
+        if (bossEncounters != null) {
+            for (Map.Entry<Point, BossEncounter> entry : bossEncounters.entrySet()) {
+                Point pos = entry.getKey();
+                BossEncounter encounter = entry.getValue();
+                if (pos == null || encounter == null || encounter.defeated) {
+                    continue;
+                }
+                int distance = Math.abs(pos.x - worldPos.x) + Math.abs(pos.y - worldPos.y);
+                if (distance == 0) {
+                    continue;
+                }
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestEncounter = encounter;
+                    nearestPoint = new Point(pos);
+                }
+            }
+        }
+        if (nearestEncounter != null && nearestPoint != null) {
+            String direction = describeDirection(nearestPoint.x - worldPos.x, nearestPoint.y - worldPos.y);
+            String requirement = nearestEncounter.requiredVitalityLevel <= vitalityUpgrades
+                    ? "DOOR OPEN"
+                    : "NEEDS " + nearestEncounter.requiredVitalityLevel + " VIT";
+            String name = formatBossName(nearestEncounter.kind);
+            return String.format(Locale.ENGLISH, "%s %s (%s)",
+                    name,
+                    direction.isBlank() ? "NEARBY" : direction,
+                    requirement);
+        }
+
+        Point rumourPoint = null;
+        nearestDistance = Integer.MAX_VALUE;
+        if (visited != null && world != null) {
+            for (Point explored : visited) {
+                Room exploredRoom = world.get(explored);
+                if (exploredRoom == null || exploredRoom.doors == null) {
+                    continue;
+                }
+                for (Dir door : exploredRoom.doors) {
+                    Point candidate = step(explored, door);
+                    if (candidate == null) {
+                        continue;
+                    }
+                    if (bossEncounters != null && bossEncounters.containsKey(candidate)) {
+                        continue;
+                    }
+                    if (!shouldSeedBossAt(candidate, false)) {
+                        continue;
+                    }
+                    int distance = Math.abs(candidate.x - worldPos.x) + Math.abs(candidate.y - worldPos.y);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        rumourPoint = new Point(candidate);
+                    }
+                }
+            }
+        }
+        if (rumourPoint != null) {
+            String direction = describeDirection(rumourPoint.x - worldPos.x, rumourPoint.y - worldPos.y);
+            int requiredVitality = Math.min(MAX_VITALITY_UPGRADES,
+                    Math.max(MIN_VITALITY_FOR_BOSS_SPAWN, 2 + bossesDefeated));
+            return String.format(Locale.ENGLISH, "RUMOUR: GUARDIAN %s (NEEDS %d VIT)",
+                    direction.isBlank() ? "AHEAD" : direction,
+                    requiredVitality);
+        }
+        return null;
+    }
+
+    private String describeDirection(int dx, int dy) {
+        if (dx == 0 && dy == 0) {
+            return "NEARBY";
+        }
+        String vertical = "";
+        String horizontal = "";
+        if (dy < 0) {
+            vertical = "NORTH";
+        } else if (dy > 0) {
+            vertical = "SOUTH";
+        }
+        if (dx < 0) {
+            horizontal = "WEST";
+        } else if (dx > 0) {
+            horizontal = "EAST";
+        }
+        if (!vertical.isEmpty() && !horizontal.isEmpty()) {
+            return vertical + "-" + horizontal;
+        }
+        return vertical.isEmpty() ? horizontal : vertical;
     }
 
     private int estimateParagraphLines(FontMetrics fm, String text, int width) {
@@ -5023,6 +5903,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (matches(e, ControlAction.SHOOT)) {
             shootPlayerBullet();
         }
+        if (matches(e, ControlAction.DASH)) {
+            startDash();
+        }
+        if (matches(e, ControlAction.PARRY)) {
+            startParry();
+        }
+        if (matches(e, ControlAction.SPECIAL)) {
+            activateAreaAbility();
+        }
         if (matches(e, ControlAction.REROLL)) {
             room = rerollObstacles(room);
             repaint();
@@ -5145,7 +6034,21 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 bossesDefeated,
                 difficulty,
                 checkpointRoom,
-                checkpointBoss
+                checkpointBoss,
+                dashTicks,
+                dashCooldownTicks,
+                dashDirX,
+                dashDirY,
+                parryWindowTicks,
+                parryCooldownTicks,
+                parryFlashTicks,
+                specialCooldownTicks,
+                nextAreaAbility,
+                comboCount,
+                comboTimerTicks,
+                comboLevel,
+                playerShotCooldownTicks,
+                lastDamageCause
         );
     }
 

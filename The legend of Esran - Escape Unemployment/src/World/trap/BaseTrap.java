@@ -1,5 +1,6 @@
 package World.trap;
 
+import java.awt.AlphaComposite;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
@@ -18,6 +19,8 @@ public abstract class BaseTrap implements Trap, Serializable {
     protected int damage = 1;
     protected double contactCooldown = 0.5;
     protected double cooldownTimer = 0.0;
+    protected int integrity = 3;
+    protected boolean destroyed = false;
 
     private final Animation animation;
     private final Rectangle bounds = new Rectangle();
@@ -37,6 +40,12 @@ public abstract class BaseTrap implements Trap, Serializable {
 
     public void setDamage(int damage) {
         this.damage = Math.max(0, damage);
+    }
+
+    public void setIntegrity(int hits) {
+        if (hits > 0) {
+            this.integrity = hits;
+        }
     }
 
     public void setContactCooldown(double seconds) {
@@ -74,14 +83,26 @@ public abstract class BaseTrap implements Trap, Serializable {
         if (g == null) {
             return;
         }
+        float alpha = active ? 1f : 0.35f;
+        java.awt.Composite oldComposite = null;
+        if (alpha < 1f) {
+            oldComposite = g.getComposite();
+            g.setComposite(AlphaComposite.SrcOver.derive(alpha));
+        }
         if (animation != null) {
             BufferedImage frame = animation.getFrame();
             if (frame != null) {
                 g.drawImage(frame, bounds.x, bounds.y, width, height, null);
+                if (oldComposite != null) {
+                    g.setComposite(oldComposite);
+                }
                 return;
             }
         }
         g.fillRect(bounds.x, bounds.y, width, height);
+        if (oldComposite != null) {
+            g.setComposite(oldComposite);
+        }
     }
 
     @Override
@@ -107,9 +128,38 @@ public abstract class BaseTrap implements Trap, Serializable {
             return;
         }
         if (damage > 0) {
-            player.takeDamage(damage);
+            player.takeDamage(damage, damageSource());
         }
         player.grantInvulnerability(Math.max(0.1, contactCooldown));
         cooldownTimer = contactCooldown;
+    }
+
+    @Override
+    public boolean onProjectileHit(double px, double py, double projectileDamage) {
+        if (!active) {
+            return false;
+        }
+        integrity -= Math.max(1, (int) Math.round(Math.max(0.0, projectileDamage)));
+        if (integrity <= 0) {
+            deactivate();
+        } else {
+            cooldownTimer = Math.min(cooldownTimer, contactCooldown * 0.5);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean shouldRemove() {
+        return destroyed;
+    }
+
+    protected String damageSource() {
+        return getClass().getSimpleName();
+    }
+
+    protected void deactivate() {
+        active = false;
+        destroyed = true;
+        cooldownTimer = 0.0;
     }
 }

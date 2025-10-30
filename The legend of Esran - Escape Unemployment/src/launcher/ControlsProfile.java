@@ -36,6 +36,9 @@ public final class ControlsProfile implements Serializable {
         defaults.put(ControlAction.MOVE_LEFT, java.awt.event.KeyEvent.VK_A);
         defaults.put(ControlAction.MOVE_RIGHT, java.awt.event.KeyEvent.VK_D);
         defaults.put(ControlAction.SHOOT, java.awt.event.KeyEvent.VK_SPACE);
+        defaults.put(ControlAction.DASH, java.awt.event.KeyEvent.VK_SHIFT);
+        defaults.put(ControlAction.PARRY, java.awt.event.KeyEvent.VK_E);
+        defaults.put(ControlAction.SPECIAL, java.awt.event.KeyEvent.VK_Q);
         defaults.put(ControlAction.REROLL, java.awt.event.KeyEvent.VK_R);
         defaults.put(ControlAction.PAUSE, java.awt.event.KeyEvent.VK_ESCAPE);
         return defaults;

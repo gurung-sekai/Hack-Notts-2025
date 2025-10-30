@@ -9,4 +9,12 @@ public interface Trap {
     Rectangle getBounds();
     boolean isActive();
     void onPlayerCollision(Player player);
+
+    default boolean onProjectileHit(double px, double py, double damage) {
+        return false;
+    }
+
+    default boolean shouldRemove() {
+        return false;
+    }
 }

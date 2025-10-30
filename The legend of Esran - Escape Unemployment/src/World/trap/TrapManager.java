@@ -42,8 +42,9 @@ public final class TrapManager implements Serializable {
         if (playerBounds == null) {
             return;
         }
+        traps.removeIf(trap -> trap != null && trap.shouldRemove());
         for (Trap trap : traps) {
-            if (!trap.isActive()) {
+            if (trap == null || !trap.isActive()) {
                 continue;
             }
             if (playerBounds.intersects(trap.getBounds())) {
@@ -59,5 +60,25 @@ public final class TrapManager implements Serializable {
         for (Trap trap : traps) {
             trap.render(g);
         }
+    }
+
+    public boolean damageTrap(double px, double py, double damage) {
+        boolean hit = false;
+        for (int i = traps.size() - 1; i >= 0; i--) {
+            Trap trap = traps.get(i);
+            if (trap == null) {
+                continue;
+            }
+            Rectangle bounds = trap.getBounds();
+            if (bounds != null && bounds.contains(px, py)) {
+                if (trap.onProjectileHit(px, py, damage)) {
+                    hit = true;
+                }
+                if (trap.shouldRemove()) {
+                    traps.remove(i);
+                }
+            }
+        }
+        return hit;
     }
 }

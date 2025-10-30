@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 3L;
+    private static final long serialVersionUID = 4L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -65,6 +65,20 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final DungeonRooms.Difficulty difficulty;
     private final Point checkpointRoom;
     private final BossBattlePanel.BossKind checkpointBoss;
+    private final int dashTicks;
+    private final int dashCooldownTicks;
+    private final double dashDirX;
+    private final double dashDirY;
+    private final int parryWindowTicks;
+    private final int parryCooldownTicks;
+    private final int parryFlashTicks;
+    private final int specialCooldownTicks;
+    private final DungeonRooms.AreaAbility nextAreaAbility;
+    private final int comboCount;
+    private final int comboTimerTicks;
+    private final int comboLevel;
+    private final int playerShotCooldownTicks;
+    private final String lastDamageCause;
 
     DungeonRoomsSnapshot(Map<Point, DungeonRooms.Room> world,
                          Map<Point, DungeonRooms.BossEncounter> bossEncounters,
@@ -108,7 +122,21 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          int bossesDefeated,
                          DungeonRooms.Difficulty difficulty,
                          Point checkpointRoom,
-                         BossBattlePanel.BossKind checkpointBoss) {
+                         BossBattlePanel.BossKind checkpointBoss,
+                         int dashTicks,
+                         int dashCooldownTicks,
+                         double dashDirX,
+                         double dashDirY,
+                         int parryWindowTicks,
+                         int parryCooldownTicks,
+                         int parryFlashTicks,
+                         int specialCooldownTicks,
+                         DungeonRooms.AreaAbility nextAreaAbility,
+                         int comboCount,
+                         int comboTimerTicks,
+                         int comboLevel,
+                         int playerShotCooldownTicks,
+                         String lastDamageCause) {
         this.world = copyRooms(world);
         this.bossEncounters = copyBossEncounters(bossEncounters);
         this.visited = copyVisited(visited);
@@ -152,6 +180,20 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.difficulty = difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
         this.checkpointRoom = checkpointRoom == null ? null : new Point(checkpointRoom);
         this.checkpointBoss = checkpointBoss;
+        this.dashTicks = dashTicks;
+        this.dashCooldownTicks = dashCooldownTicks;
+        this.dashDirX = dashDirX;
+        this.dashDirY = dashDirY;
+        this.parryWindowTicks = parryWindowTicks;
+        this.parryCooldownTicks = parryCooldownTicks;
+        this.parryFlashTicks = parryFlashTicks;
+        this.specialCooldownTicks = specialCooldownTicks;
+        this.nextAreaAbility = nextAreaAbility == null ? DungeonRooms.AreaAbility.FIRE_RING : nextAreaAbility;
+        this.comboCount = comboCount;
+        this.comboTimerTicks = comboTimerTicks;
+        this.comboLevel = comboLevel;
+        this.playerShotCooldownTicks = playerShotCooldownTicks;
+        this.lastDamageCause = lastDamageCause;
     }
 
     public Map<Point, DungeonRooms.Room> world() {
@@ -324,6 +366,62 @@ public final class DungeonRoomsSnapshot implements Serializable {
 
     public BossBattlePanel.BossKind checkpointBoss() {
         return checkpointBoss;
+    }
+
+    public int dashTicks() {
+        return dashTicks;
+    }
+
+    public int dashCooldownTicks() {
+        return dashCooldownTicks;
+    }
+
+    public double dashDirX() {
+        return dashDirX;
+    }
+
+    public double dashDirY() {
+        return dashDirY;
+    }
+
+    public int parryWindowTicks() {
+        return parryWindowTicks;
+    }
+
+    public int parryCooldownTicks() {
+        return parryCooldownTicks;
+    }
+
+    public int parryFlashTicks() {
+        return parryFlashTicks;
+    }
+
+    public int specialCooldownTicks() {
+        return specialCooldownTicks;
+    }
+
+    public DungeonRooms.AreaAbility nextAreaAbility() {
+        return nextAreaAbility == null ? DungeonRooms.AreaAbility.FIRE_RING : nextAreaAbility;
+    }
+
+    public int comboCount() {
+        return comboCount;
+    }
+
+    public int comboTimerTicks() {
+        return comboTimerTicks;
+    }
+
+    public int comboLevel() {
+        return comboLevel;
+    }
+
+    public int playerShotCooldownTicks() {
+        return playerShotCooldownTicks;
+    }
+
+    public String lastDamageCause() {
+        return lastDamageCause;
     }
 
     private static Map<Point, DungeonRooms.Room> copyRooms(Map<Point, DungeonRooms.Room> source) {

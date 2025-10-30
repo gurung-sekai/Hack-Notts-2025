@@ -11,6 +11,16 @@ pieces are:
 | `SawTrap`, `SpikeTrap`, `FireVentTrap` | Concrete trap behaviours with tuned damage and activation patterns. |
 | `TrapManager` | Holds the active traps for a room, updates them each tick, renders them, and applies collision damage to a `World.trap.Player` implementation. |
 
+Traps stay dormant for the opening skirmishes—only after you clear a few combat
+rooms do saws, spikes, and vents begin spawning. That ramp keeps early
+exploration approachable while still letting late-game layouts mix hazards with
+enemy packs.
+
+Player bullets, reflected enemy projectiles, and the hero’s area abilities all funnel into
+`TrapManager.damageTrap(...)`, so every hazard can be dismantled mid-combat. Tougher
+floors simply increase the integrity value, encouraging you to leverage the combo meter
+for faster takedowns.
+
 ## Usage Example
 
 The snippet below demonstrates how to wire traps into a standalone room. The
