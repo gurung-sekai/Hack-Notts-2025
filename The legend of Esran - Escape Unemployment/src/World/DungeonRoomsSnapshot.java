@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 4L;
+    private static final long serialVersionUID = 5L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -62,6 +62,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final int damageLevel;
     private final int enemiesDefeated;
     private final int bossesDefeated;
+    private final int storyBossIndex;
     private final DungeonRooms.Difficulty difficulty;
     private final Point checkpointRoom;
     private final BossBattlePanel.BossKind checkpointBoss;
@@ -120,6 +121,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          int damageLevel,
                          int enemiesDefeated,
                          int bossesDefeated,
+                         int storyBossIndex,
                          DungeonRooms.Difficulty difficulty,
                          Point checkpointRoom,
                          BossBattlePanel.BossKind checkpointBoss,
@@ -177,6 +179,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.damageLevel = damageLevel;
         this.enemiesDefeated = enemiesDefeated;
         this.bossesDefeated = bossesDefeated;
+        this.storyBossIndex = storyBossIndex;
         this.difficulty = difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
         this.checkpointRoom = checkpointRoom == null ? null : new Point(checkpointRoom);
         this.checkpointBoss = checkpointBoss;
@@ -354,6 +357,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
 
     public int bossesDefeated() {
         return bossesDefeated;
+    }
+
+    public int storyBossIndex() {
+        return storyBossIndex;
     }
 
     public DungeonRooms.Difficulty difficulty() {
