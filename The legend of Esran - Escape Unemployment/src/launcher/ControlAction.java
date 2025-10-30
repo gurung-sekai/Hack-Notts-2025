@@ -9,6 +9,9 @@ public enum ControlAction {
     MOVE_LEFT,
     MOVE_RIGHT,
     SHOOT,
+    DASH,
+    PARRY,
+    SPECIAL,
     REROLL,
     PAUSE
 }

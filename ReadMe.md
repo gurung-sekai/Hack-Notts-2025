@@ -18,281 +18,75 @@
 **The Legend of Aetheria** is a 2D dungeon crawler built entirely in **pure Java**, without any engines or frameworks.
 Each dungeon is procedurally generated with randomized obstacles, enemy placements, and door configurations — creating a fresh experience every time.
 
+## Progression & Difficulty
+
+- **Difficulty selection:** Every new adventure begins with a choice between **Easy** (respawn at the latest boss checkpoint) and **Hard** (permadeath) modes.
+- **Vitality upgrades:** You now start too frail to challenge the first boss; collect coins and purchase at least **two Vitality Sigils** from the shop to unlock that battle. Later bosses demand even more sigils, so plan your farming routes.
+- **Safe exploration:** The first rings of rooms (and any area while a boss door is waiting) stay combat-focused rather than boss-gated, letting you grind coins and strength upgrades before you choose to advance on a guardian.
+- **Dungeon wards & healing:** Additional wards can be purchased to extend your dungeon health pool while keeping the original base hearts intact. Healing flasks remain for topping off between encounters.
+- **Scaling combat:** Defeating enemies increases your damage tier, and every conquered boss raises both their future health pools and your own heroic stats—keeping encounters tense right to the finale.
+
+Together these systems ensure a deliberate power curve: prepare in the dungeon, spend wisely in the shop, and only then tackle the guardians guarding each lair.
+
+## Development Documentation
+
+- [Legacy Maintenance Playbook](docs/LegacyMaintenancePlaybook.md) — structured guidance for keeping large changes organised, tagged, and well documented.
+- [Trap System Overview](docs/TrapSystem.md) — explains the reusable animation loader, trap APIs, and how to export compatible Aseprite sprites.
+
 > **Windows build note:** If you are working inside a OneDrive-synchronised folder, Gradle will automatically redirect its build output to `%LOCALAPPDATA%\HackNotts\legend-of-esran` to avoid the `Unable to delete directory … build/classes/java/main` error. You can override the location via the `legend.buildDir` Gradle property or the `GRADLE_BUILD_DIR` environment variable when needed.
 
-> **Boss sprite sequences:** Pre-sliced boss frames placed under `src/resources/bosses/<Name>/…` (or similar prefixed directories) are now detected automatically. The game will load those numbered PNGs directly and only fall back to runtime sheet slicing when no split frames are found.
+> **Sprite utilities:** Boss frames placed under `src/resources/bosses/<Name>/…` are detected automatically. Use `./gradlew exportSpriteSlices` for a quick preview or `./gradlew :extractor:run --args="file=<sheet> outDir=<folder>"` to process new sprite sheets with the JavaFX inspector.
 
-> **Sprite slicing preview:** Run `./gradlew exportSpriteSlices` to regenerate every boss frame under `build/slicerPreview/…` for quick visual inspection outside the game.
+## Controls at a Glance
 
-> **SpriteSheet AI Extractor:** A dedicated Gradle project under `extractor/` can segment any supplied PNG sheets, preview the overlays, and export Unity/Godot metadata. Run `./gradlew :extractor:run --args="file=../The legend of Esran - Escape Unemployment/src/resources/bosses/attacks/theWelchAttack3.png outDir=./out visualize=true"` to process a single sheet with the JavaFX inspector.
+| Action | Default Binding |
+|--------|-----------------|
+| Move | **W A S D** (arrow keys also work) |
+| Shoot | **Space** |
+| Dash (brief i-frames) | **Left Shift** |
+| Parry / Reflect | **E** |
+| Area Burst (rotates Fire Ring ↔ Lightning Pulse) | **Q** |
+| Reroll room obstacles | **R** |
+| Pause / Menu | **Esc** |
 
-The player explores interconnected rooms, fights monsters, collects bows, keys, and arrows, and survives until facing the **final boss** — a large red monster that signifies the beginning of an upcoming turn-based battle system.
+You can remap every action from the launcher before starting a run.
 
+## Combat Toolkit
 
-Our gameplay Video is uploaded on Youtube! 
+- **Dash:** A swift burst that ignores damage for a quarter-second. Perfect for slipping through saw blades or dodging boss openers.
+- **Parry:** Raises a short timing window that reflects the next projectile. Reflected shots become friendly, pierce traps, and deal bonus damage.
+- **Area Bursts:** Q alternates between a Fire Ring (burns nearby foes and scorches traps) and a Lightning Pulse (locks onto multiple enemies, stunning them briefly).
+- **Combo Meter:** Landing hits, disabling traps, and reflecting shots build a combo that boosts attack speed and damage. The HUD now shows combo level and the exact bonus.
 
-https://www.youtube.com/watch?v=2vcR7R3X1Wk
+## Enemy Synergies
 
-edited by Julil
+- **Archers + Knights:** Shield-bearing knights soak up frontal damage while archers pepper the arena. Flank the knights or parry an arrow to turn their formation against them.
+- **Necromancers:** Will resurrect any fallen ally that isn’t another necromancer. Interrupt them quickly or clear corpses with area bursts.
+- **Bards:** Buff nearby enemies with damage and speed auras. They’re fragile but must be prioritised before the frontline overwhelms you.
+- **Trap Combos:** Later rooms mix hazards with enemy packs—shoot traps to soften the arena or bait foes into their own machinery.
 
----
+## Traps & Hazards
 
-## Architecture Overview
+- Early rooms are safe for grinding; traps only appear once you’ve cleared a few encounters.
+- Saws, spike plates, and fire vents animate directly from Aseprite exports. They can all be disabled with bullets, reflected shots, or area bursts.
+- Trap integrity scales with depth, so the combo meter is invaluable for shredding them quickly.
 
-| File | Description |
-|------|--------------|
-| `DungeonRooms.java` | Core game logic: room generation, rendering, and collision detection |
-| `Player.java` | Handles player input, movement, HP, and attacks |
-| `Enemy.java` | Defines AI, attack behavior, and monster updates |
-| `launcher/GameLauncher.java` | Desktop launcher for resolution, refresh rate, language, and control bindings |
-| `World/DungeonRoomsSnapshot.java` | Serializable save-state used for resuming campaigns |
+## Boss Intel & Navigation
 
-Each component has a clearly separated responsibility, making the project scalable and easy to maintain.
+- Boss doorways glow red, display their vitality requirement, and the HUD now surfaces a **Guardian Hint** showing the direction of the nearest encounter (or the next likely spawn).
+- Easy mode respawns you at the last defeated boss. Hard mode is permadeath, but the game-over dialog now tells you what dealt the final blow.
+- Vitality upgrades gate the guardians—collect enough sigils from the shop before pushing deeper.
 
----
+## Persistence & Difficulty
 
-## Game Loop
+- Rooms, enemy states, traps, and your full ability cooldowns are serialized. Loading a save restores dash/parry timers, combo level, and the current burst in rotation.
+- Easy mode keeps progress even after a defeat. Hard mode ends the campaign immediately, so plan those shop runs carefully.
 
-The core loop runs at **~60 FPS** using a `Timer`-based update system:
 
-```java
-private final Timer timer = new Timer(1000 / FPS, this);
-```
-
-Each frame:
-1. Reads user input (WASD / Arrows / Mouse Click).  
-2. Updates entity states (player, enemies, fireballs).  
-3. Checks collisions and applies damage.  
-4. Renders visuals on the canvas.
-
-This ensures consistent frame pacing and smooth motion across systems.
-
----
-
-## Procedural Dungeon Generation
-
-Each dungeon room is **generated on the fly** with random tiles, walls, and enemy layouts.  
-Key design features:
-- 1–3 randomly placed **doors** (N, S, E, or W)  
-- **Randomized obstacles** and **enemy spawn patterns**  
-- Persistent world — previously visited rooms are stored in memory  
-
-Rooms are stored in a `HashMap`:
-```java
-Map<Coord, Room> world = new HashMap<>();
-```
-
-Returning to an earlier room restores its previous layout, ensuring continuity.
-
----
-
-## Player System
-
-The player can move, swing a sword, and fire arrows once a bow is obtained.  
-The control system is designed for fluid movement and balanced combat.
-
-| Attribute | Description |
-|------------|-------------|
-| `HP` | Player health |
-| `keys` | Unlocks locked doors |
-| `arrows` | Ammunition for the bow |
-| `hasBow` | Whether the player owns a bow |
-| `invuln` | Invulnerability frames after being hit |
-
-### Controls:
-- **WASD / Arrow Keys** — Movement  
-- **Mouse Click** — Sword attack  
-- **F** — Shoot arrow (requires bow + arrows)  
-- **Space** — Restart after Game Over  
-
----
-
-## Enemy System
-
-The world is populated with four primary enemy types:
-
-| Enemy | Speed | Attack Type | Behavior |
-|--------|--------|-------------|-----------|
-| **Slime** | Slow | Fireball | Basic ranged shooter |
-| **Snake** | Medium | Melee | Pursues player directly |
-| **Bat** | Fast | Fireball | Chaotic, high-speed ranged attacker |
-| **Boss** | Very Fast | None | Spawns after 7 rooms; initiates battle freeze |
-
-Unfortunately, we were unable to implement additional mobs due to time constraint but we hope to add these additional mobs in the future. 
-
-Enemies have independent cooldowns and simple AI logic:
-- Pathfinding toward player position  
-- Telegraphed attacks (glow before firing)  
-- Projectile spawning via internal cooldowns  
-
----
-
-## Projectile System
-
-All projectiles (arrows and fireballs) are stored and updated per frame.
-
-```java
-room.projectiles.add(new Projectile(ProjType.ARROW, cx, cy, vx, vy));
-```
-
-Each projectile:
-- Uses velocity vectors for direction  
-- Checks wall and entity collisions  
-- Is deleted once out of bounds  
-
-Fireballs appear as **clean glowing orbs**, rendered using Java’s 2D graphics:
-
-```java
-gg.setColor(new Color(255, 150, 0, 180));
-gg.fillOval(x, y, 8, 8);
-```
-
----
-
-## Collision & Movement
-
-Collision detection uses simple rectangle intersection checks (`java.awt.Rectangle`).  
-Movement vectors are normalized to maintain consistent speed in all directions.
-
-```java
-if (playerRect.intersects(enemyRect)) hp--;
-```
-
-This ensures fair and accurate physics without complex engines.
-
----
-
-## Persistence & Progression
-
-- **Rooms are saved** in a `HashMap` to ensure persistence between visits.  
-- **Keys, bows, and arrows** carry over between rooms.  
-- **Enemies drop items** randomly on defeat.  
-- After **7 doors**, the **Boss Room** spawns automatically.  
-
-This structure allows infinite replay and progressive difficulty scaling.
-
----
-
-## Game Over & Restart System
-
-When the player’s HP reaches 0:
-- The game pauses and displays a message:  
-  > “GAME OVER — Click or Space to Retry”
-- Clicking or pressing Space resets the dungeon and regenerates new rooms.  
-- Bow progress is retained between runs to encourage replayability.
-
----
-
-## Architecture Diagram
-
-```plaintext
-DungeonRooms.java
- ├── main() → initializes window and loop
- ├── generateRoom() → procedural layout logic
- ├── draw() → renders game elements
- ├── handleInput() → movement and combat
- ├── checkCollisions() → player/enemy/projectile interactions
- └── restart() → resets game state
-
-Player.java
- ├── move()
- ├── attack()
- ├── shootArrow()
- └── draw()
-
-Enemy.java
- ├── updateAI()
- ├── fireProjectile()
- └── draw()
-```
-
----
-
-## Data Structures Used
-
-| Data Type | Purpose |
-|------------|----------|
-| `HashMap<Coord, Room>` | Persistent room storage |
-| `ArrayList<Enemy>` | Active enemies in current room |
-| `ArrayList<Projectile>` | Active fireballs/arrows |
-| `EnumSet<Dir>` | Tracks available door directions |
-| `Random` | RNG for procedural generation |
-
----
-
-
-## Gameplay Video 
-
+## Gameplay Video
 
 https://github.com/user-attachments/assets/db35e8b3-03a1-403c-a27f-1af4b79ce809
 
+## Credits
 
----
-
-## Core Features
-
-- Procedurally generated dungeon rooms  
-- Real-time sword and bow combat  
-- Multiple enemy AI patterns  
-- Dynamic obstacles and keys  
-- Boss encounter system  
-- Persistent world memory  
-- Game Over + Restart loop  
-- Glowing projectile effects  
-
----
-
-## Future Roadmap
-
-| Feature | Description |
-|----------|-------------|
-| Sprite Integration | Replace shapes with proper character & tile art |
-| Sound System | Add music, sword swings, and hit sounds |
-| Turn-Based Boss Battles | Pokémon-style fight system for bosses |
-| Save System | Add persistent saves and profiles |
-| Co-op Mode | Local two-player support |
-| UI Upgrade | Health bars, inventory screen, and minimap |
-
----
-
-## Lessons Learned
-
-- Procedural generation improves replayability but complicates debugging.  
-- AI tuning is critical for fair, engaging combat.  
-- Manual frame control deepens understanding of Java’s graphics pipeline.  
-- A modular structure makes iterative development much faster.
-
----
-
-## Conclusion
-
-**The Legend of Aetheria** is proof that a complete dungeon-crawling experience can be built entirely in Java — with no game engine, just code.  
-It captures retro aesthetics, procedural depth, and action gameplay within a self-contained system.  
-
-This project serves as a foundation for future extensions into textured graphics, sound integration, and turn-based combat.
-
----
-
-## Built With
-
-| Tool | Purpose |
-|------|----------|
-| **Java (JDK 25)** | Core language |
-| **IntelliJ IDEA** | IDE and debugger |
-| **Java 2D Graphics / AWT** | Rendering system |
-| **macOS & Windows** | Cross-platform tested |
-
----
-
-## Developer
-
-**Created by:**  
-**Pritam, Esran, Jaleel, and Ola**  
-*Computer Science Student, University of Nottingham*  
-Hackathon 2025 Project — *Retro Java Dungeon Adventure*
-
----
-
-
-
-
+Created by **Pritam, Esran, Jaleel, and Ola** for HackNotts 2025.

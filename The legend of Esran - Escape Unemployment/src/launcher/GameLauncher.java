@@ -356,8 +356,9 @@ public final class GameLauncher {
         }
 
         DungeonRoomsSnapshot data = snapshot.orElse(null);
+        DungeonRooms.Difficulty difficulty = data != null ? data.difficulty() : promptDifficulty();
         DungeonRooms panel = new DungeonRooms(launchSettings, controlsCopy, bundle, saver, exit, data,
-                new SwingBossBattleHost());
+                new SwingBossBattleHost(), difficulty);
         panel.setPreferredSize(launchSettings.resolution());
         panel.setMinimumSize(launchSettings.resolution());
         panel.setMaximumSize(launchSettings.resolution());
@@ -374,6 +375,22 @@ public final class GameLauncher {
         cardPanel.repaint();
 
         SwingUtilities.invokeLater(panel::requestFocusInWindow);
+    }
+
+    private DungeonRooms.Difficulty promptDifficulty() {
+        String[] options = {
+                "Easy - respawn at last checkpoint",
+                "Hard - no respawns"
+        };
+        int choice = JOptionPane.showOptionDialog(frame,
+                "Choose your challenge.",
+                "Select Difficulty",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]);
+        return choice == 1 ? DungeonRooms.Difficulty.HARD : DungeonRooms.Difficulty.EASY;
     }
 
     private void enableFullScreen() {
@@ -576,12 +593,22 @@ public final class GameLauncher {
         ControlsProfile profile = settings.mutableControls();
         String message = "Explore the Ember Caverns, unlock sealed doors, and defeat guardians to recover " +
                 "lost relics.\n\n" +
-                String.format("Move: %s/%s/%s/%s\nShoot: %s\nReroll obstacles: %s\nPause & access menu: %s",
+                String.format(
+                        "Move: %s/%s/%s/%s\n" +
+                                "Shoot: %s\n" +
+                                "Dash (invulnerable burst): %s\n" +
+                                "Parry (reflect projectiles): %s\n" +
+                                "Special (ring/pulse): %s\n" +
+                                "Reroll obstacles: %s\n" +
+                                "Pause & access menu: %s",
                         key(profile, ControlAction.MOVE_UP),
                         key(profile, ControlAction.MOVE_DOWN),
                         key(profile, ControlAction.MOVE_LEFT),
                         key(profile, ControlAction.MOVE_RIGHT),
                         key(profile, ControlAction.SHOOT),
+                        key(profile, ControlAction.DASH),
+                        key(profile, ControlAction.PARRY),
+                        key(profile, ControlAction.SPECIAL),
                         key(profile, ControlAction.REROLL),
                         key(profile, ControlAction.PAUSE));
         JOptionPane.showMessageDialog(frame, message, "How to play", JOptionPane.INFORMATION_MESSAGE);
@@ -736,8 +763,10 @@ public final class GameLauncher {
 
     private final class SwingBossBattleHost implements DungeonRooms.BossBattleHost {
         @Override
-        public void runBossBattle(BossBattlePanel.BossKind kind, Consumer<BossBattlePanel.Outcome> outcomeHandler) {
-            BossBattlePanel panel = BossBattlePanel.create(kind, outcome -> {
+        public void runBossBattle(BossBattlePanel.BossKind kind,
+                                  BossBattlePanel.BattleTuning tuning,
+                                  Consumer<BossBattlePanel.Outcome> outcomeHandler) {
+            BossBattlePanel panel = BossBattlePanel.create(kind, tuning, outcome -> {
                 outcomeHandler.accept(outcome);
                 SwingUtilities.invokeLater(() -> {
                     if (bossWrapper != null) {
@@ -768,6 +797,11 @@ public final class GameLauncher {
             cardPanel.revalidate();
             cardPanel.repaint();
             SwingUtilities.invokeLater(panel::requestFocusInWindow);
+        }
+
+        @Override
+        public void runBossBattle(BossBattlePanel.BossKind kind, Consumer<BossBattlePanel.Outcome> outcomeHandler) {
+            runBossBattle(kind, null, outcomeHandler);
         }
     }
 

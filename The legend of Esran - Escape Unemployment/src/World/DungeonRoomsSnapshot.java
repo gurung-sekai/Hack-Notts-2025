@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 4L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -57,6 +57,28 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final boolean finaleShown;
     private final Random rng;
     private final SecureRandom secureRandom;
+    private final int vitalityLevel;
+    private final int dungeonLevel;
+    private final int damageLevel;
+    private final int enemiesDefeated;
+    private final int bossesDefeated;
+    private final DungeonRooms.Difficulty difficulty;
+    private final Point checkpointRoom;
+    private final BossBattlePanel.BossKind checkpointBoss;
+    private final int dashTicks;
+    private final int dashCooldownTicks;
+    private final double dashDirX;
+    private final double dashDirY;
+    private final int parryWindowTicks;
+    private final int parryCooldownTicks;
+    private final int parryFlashTicks;
+    private final int specialCooldownTicks;
+    private final DungeonRooms.AreaAbility nextAreaAbility;
+    private final int comboCount;
+    private final int comboTimerTicks;
+    private final int comboLevel;
+    private final int playerShotCooldownTicks;
+    private final String lastDamageCause;
 
     DungeonRoomsSnapshot(Map<Point, DungeonRooms.Room> world,
                          Map<Point, DungeonRooms.BossEncounter> bossEncounters,
@@ -92,7 +114,29 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          boolean queenRescued,
                          boolean finaleShown,
                          Random rng,
-                         SecureRandom secureRandom) {
+                         SecureRandom secureRandom,
+                         int vitalityLevel,
+                         int dungeonLevel,
+                         int damageLevel,
+                         int enemiesDefeated,
+                         int bossesDefeated,
+                         DungeonRooms.Difficulty difficulty,
+                         Point checkpointRoom,
+                         BossBattlePanel.BossKind checkpointBoss,
+                         int dashTicks,
+                         int dashCooldownTicks,
+                         double dashDirX,
+                         double dashDirY,
+                         int parryWindowTicks,
+                         int parryCooldownTicks,
+                         int parryFlashTicks,
+                         int specialCooldownTicks,
+                         DungeonRooms.AreaAbility nextAreaAbility,
+                         int comboCount,
+                         int comboTimerTicks,
+                         int comboLevel,
+                         int playerShotCooldownTicks,
+                         String lastDamageCause) {
         this.world = copyRooms(world);
         this.bossEncounters = copyBossEncounters(bossEncounters);
         this.visited = copyVisited(visited);
@@ -128,6 +172,28 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.finaleShown = finaleShown;
         this.rng = rng == null ? null : copyRandom(rng);
         this.secureRandom = secureRandom == null ? null : copySecureRandom(secureRandom);
+        this.vitalityLevel = vitalityLevel;
+        this.dungeonLevel = dungeonLevel;
+        this.damageLevel = damageLevel;
+        this.enemiesDefeated = enemiesDefeated;
+        this.bossesDefeated = bossesDefeated;
+        this.difficulty = difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
+        this.checkpointRoom = checkpointRoom == null ? null : new Point(checkpointRoom);
+        this.checkpointBoss = checkpointBoss;
+        this.dashTicks = dashTicks;
+        this.dashCooldownTicks = dashCooldownTicks;
+        this.dashDirX = dashDirX;
+        this.dashDirY = dashDirY;
+        this.parryWindowTicks = parryWindowTicks;
+        this.parryCooldownTicks = parryCooldownTicks;
+        this.parryFlashTicks = parryFlashTicks;
+        this.specialCooldownTicks = specialCooldownTicks;
+        this.nextAreaAbility = nextAreaAbility == null ? DungeonRooms.AreaAbility.FIRE_RING : nextAreaAbility;
+        this.comboCount = comboCount;
+        this.comboTimerTicks = comboTimerTicks;
+        this.comboLevel = comboLevel;
+        this.playerShotCooldownTicks = playerShotCooldownTicks;
+        this.lastDamageCause = lastDamageCause;
     }
 
     public Map<Point, DungeonRooms.Room> world() {
@@ -270,6 +336,94 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return secureRandom == null ? new SecureRandom() : copySecureRandom(secureRandom);
     }
 
+    public int vitalityLevel() {
+        return vitalityLevel;
+    }
+
+    public int dungeonLevel() {
+        return dungeonLevel;
+    }
+
+    public int damageLevel() {
+        return damageLevel;
+    }
+
+    public int enemiesDefeated() {
+        return enemiesDefeated;
+    }
+
+    public int bossesDefeated() {
+        return bossesDefeated;
+    }
+
+    public DungeonRooms.Difficulty difficulty() {
+        return difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
+    }
+
+    public Point checkpointRoom() {
+        return checkpointRoom == null ? null : new Point(checkpointRoom);
+    }
+
+    public BossBattlePanel.BossKind checkpointBoss() {
+        return checkpointBoss;
+    }
+
+    public int dashTicks() {
+        return dashTicks;
+    }
+
+    public int dashCooldownTicks() {
+        return dashCooldownTicks;
+    }
+
+    public double dashDirX() {
+        return dashDirX;
+    }
+
+    public double dashDirY() {
+        return dashDirY;
+    }
+
+    public int parryWindowTicks() {
+        return parryWindowTicks;
+    }
+
+    public int parryCooldownTicks() {
+        return parryCooldownTicks;
+    }
+
+    public int parryFlashTicks() {
+        return parryFlashTicks;
+    }
+
+    public int specialCooldownTicks() {
+        return specialCooldownTicks;
+    }
+
+    public DungeonRooms.AreaAbility nextAreaAbility() {
+        return nextAreaAbility == null ? DungeonRooms.AreaAbility.FIRE_RING : nextAreaAbility;
+    }
+
+    public int comboCount() {
+        return comboCount;
+    }
+
+    public int comboTimerTicks() {
+        return comboTimerTicks;
+    }
+
+    public int comboLevel() {
+        return comboLevel;
+    }
+
+    public int playerShotCooldownTicks() {
+        return playerShotCooldownTicks;
+    }
+
+    public String lastDamageCause() {
+        return lastDamageCause;
+    }
+
     private static Map<Point, DungeonRooms.Room> copyRooms(Map<Point, DungeonRooms.Room> source) {
         Map<Point, DungeonRooms.Room> result = new HashMap<>();
         if (source == null) {
@@ -297,6 +451,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
         clone.lockedDoors = room.lockedDoors.clone();
         clone.cleared = room.cleared;
         clone.spawnsPrepared = room.spawnsPrepared;
+        clone.trapSpawns = copyTraps(room.trapSpawns);
+        clone.trapsPrepared = room.trapsPrepared;
+        clone.trapSeed = room.trapSeed;
+        clone.trapManager = null;
         clone.floorThemeSeed = room.floorThemeSeed;
         clone.wallThemeSeed = room.wallThemeSeed;
         clone.paletteIndex = room.paletteIndex;
@@ -321,6 +479,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
             copy.defeated = original.defeated;
             copy.rewardClaimed = original.rewardClaimed;
             copy.preludeShown = original.preludeShown;
+            copy.requiredVitalityLevel = original.requiredVitalityLevel;
             result.put(new Point(entry.getKey()), copy);
         }
         return result;
@@ -404,6 +563,31 @@ public final class DungeonRoomsSnapshot implements Serializable {
             c.value = coin.value;
             c.animTick = coin.animTick;
             list.add(c);
+        }
+        return list;
+    }
+
+    private static List<DungeonRooms.RoomTrap> copyTraps(List<DungeonRooms.RoomTrap> traps) {
+        List<DungeonRooms.RoomTrap> list = new ArrayList<>();
+        if (traps == null) {
+            return list;
+        }
+        for (DungeonRooms.RoomTrap trap : traps) {
+            DungeonRooms.RoomTrap t = new DungeonRooms.RoomTrap();
+            t.kind = trap.kind;
+            t.x = trap.x;
+            t.y = trap.y;
+            t.width = trap.width;
+            t.height = trap.height;
+            t.animationFolder = trap.animationFolder;
+            t.frameDuration = trap.frameDuration;
+            t.cycleSeconds = trap.cycleSeconds;
+            t.activeFraction = trap.activeFraction;
+            t.burstEvery = trap.burstEvery;
+            t.burstDuration = trap.burstDuration;
+            t.damageOverride = trap.damageOverride;
+            t.contactCooldownOverride = trap.contactCooldownOverride;
+            list.add(t);
         }
         return list;
     }
