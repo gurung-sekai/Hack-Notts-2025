@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 4L;
+    private static final long serialVersionUID = 6L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -62,6 +62,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
     private final int damageLevel;
     private final int enemiesDefeated;
     private final int bossesDefeated;
+    private final int storyBossIndex;
     private final DungeonRooms.Difficulty difficulty;
     private final Point checkpointRoom;
     private final BossBattlePanel.BossKind checkpointBoss;
@@ -120,6 +121,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
                          int damageLevel,
                          int enemiesDefeated,
                          int bossesDefeated,
+                         int storyBossIndex,
                          DungeonRooms.Difficulty difficulty,
                          Point checkpointRoom,
                          BossBattlePanel.BossKind checkpointBoss,
@@ -177,6 +179,7 @@ public final class DungeonRoomsSnapshot implements Serializable {
         this.damageLevel = damageLevel;
         this.enemiesDefeated = enemiesDefeated;
         this.bossesDefeated = bossesDefeated;
+        this.storyBossIndex = storyBossIndex;
         this.difficulty = difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
         this.checkpointRoom = checkpointRoom == null ? null : new Point(checkpointRoom);
         this.checkpointBoss = checkpointBoss;
@@ -356,6 +359,10 @@ public final class DungeonRoomsSnapshot implements Serializable {
         return bossesDefeated;
     }
 
+    public int storyBossIndex() {
+        return storyBossIndex;
+    }
+
     public DungeonRooms.Difficulty difficulty() {
         return difficulty == null ? DungeonRooms.Difficulty.EASY : difficulty;
     }
@@ -480,6 +487,8 @@ public final class DungeonRoomsSnapshot implements Serializable {
             copy.rewardClaimed = original.rewardClaimed;
             copy.preludeShown = original.preludeShown;
             copy.requiredVitalityLevel = original.requiredVitalityLevel;
+            copy.storyEncounter = original.storyEncounter;
+            copy.storySequenceIndex = original.storySequenceIndex;
             result.put(new Point(entry.getKey()), copy);
         }
         return result;
@@ -587,6 +596,12 @@ public final class DungeonRoomsSnapshot implements Serializable {
             t.burstDuration = trap.burstDuration;
             t.damageOverride = trap.damageOverride;
             t.contactCooldownOverride = trap.contactCooldownOverride;
+            t.id = trap.id;
+            t.visualWidth = trap.visualWidth;
+            t.visualHeight = trap.visualHeight;
+            t.visualOffsetX = trap.visualOffsetX;
+            t.visualOffsetY = trap.visualOffsetY;
+            t.pixelAccurate = trap.pixelAccurate;
             list.add(t);
         }
         return list;

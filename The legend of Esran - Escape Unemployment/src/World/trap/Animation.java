@@ -17,6 +17,8 @@ public final class Animation implements Serializable {
     private boolean loop = true;
     private double accumulator = 0.0;
     private int index = 0;
+    private final int maxWidth;
+    private final int maxHeight;
 
     public Animation(BufferedImage[] frames, double frameDurationSeconds) {
         if (frames == null || frames.length == 0) {
@@ -27,6 +29,17 @@ public final class Animation implements Serializable {
         }
         this.frames = frames;
         this.frameDuration = frameDurationSeconds;
+        int width = 0;
+        int height = 0;
+        for (BufferedImage frame : frames) {
+            if (frame == null) {
+                continue;
+            }
+            width = Math.max(width, frame.getWidth());
+            height = Math.max(height, frame.getHeight());
+        }
+        this.maxWidth = Math.max(1, width);
+        this.maxHeight = Math.max(1, height);
     }
 
     public BufferedImage getFrame() {
@@ -34,11 +47,11 @@ public final class Animation implements Serializable {
     }
 
     public int getWidth() {
-        return frames[0].getWidth();
+        return maxWidth;
     }
 
     public int getHeight() {
-        return frames[0].getHeight();
+        return maxHeight;
     }
 
     public int getFrameCount() {
