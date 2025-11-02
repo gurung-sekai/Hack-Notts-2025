@@ -431,9 +431,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private static final String PLAYER_IDLE_PREFIX = "resources/sprites/Knight/Idle/knight_m_idle_anim_f";
     private static final String ENEMY_IDLE_PREFIX = "resources/sprites/Imp/imp_idle_anim_f";
     private static final String BOSS_IDLE_PREFIX = "resources/sprites/Bigzombie/big_zombie_idle_anim_f";
-    private static final String SAW_TRAP_FOLDER = "resources/traps/Saw Trap/idle";
-    private static final String SPIKE_TRAP_FOLDER = "resources/traps/Spike Trap/cycle";
-    private static final String FIRE_TRAP_FOLDER = "resources/traps/Fire Trap/attack";
+    private static final String LEGACY_SAW_TRAP_FOLDER = "resources/traps/Saw Trap/idle";
+    private static final String LEGACY_SPIKE_TRAP_FOLDER = "resources/traps/Spike Trap/cycle";
+    private static final String LEGACY_FIRE_TRAP_FOLDER = "resources/traps/Fire Trap/attack";
+
+    private static final String SAW_TRAP_SHEET = "resources/traps/Saw Trap/PNGs/Saw Trap - Level 2.png";
+    private static final String SPIKE_TRAP_SHEET = "resources/traps/Ceiling Trap/PNGs/Ceiling Trap - Level 1.png";
+    private static final String FIRE_TRAP_SHEET = "resources/traps/Fire Breather Trap/PNGs/Fire Breather Trap - Level 1.png";
 
     private final GameSettings settings;
     private final ControlsProfile controls;
@@ -1569,9 +1573,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (def == null || def.kind == null) {
             return null;
         }
-        String folder = def.animationFolder == null || def.animationFolder.isBlank()
-                ? defaultTrapFolder(def.kind)
-                : def.animationFolder;
+        String folder = normaliseTrapResource(def);
         double frameDuration = def.frameDuration > 0 ? def.frameDuration : defaultFrameDuration(def.kind);
         Animation animation = new Animation(SpriteLoader.loadDefault(folder), frameDuration);
         BaseTrap trap;
@@ -1598,9 +1600,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private String defaultTrapFolder(TrapKind kind) {
         return switch (kind) {
-            case SAW -> SAW_TRAP_FOLDER;
-            case SPIKE -> SPIKE_TRAP_FOLDER;
-            case FIRE_VENT -> FIRE_TRAP_FOLDER;
+            case SAW -> SAW_TRAP_SHEET;
+            case SPIKE -> SPIKE_TRAP_SHEET;
+            case FIRE_VENT -> FIRE_TRAP_SHEET;
         };
     }
 
@@ -1612,6 +1614,36 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         };
     }
 
+    private String normaliseTrapResource(RoomTrap def) {
+        if (def == null) {
+            return SAW_TRAP_SHEET;
+        }
+        TrapKind kind = def.kind;
+        String resource = def.animationFolder;
+        if (resource == null || resource.isBlank()) {
+            return kind == null ? SAW_TRAP_SHEET : defaultTrapFolder(kind);
+        }
+        if (kind == null) {
+            return resource;
+        }
+        return switch (kind) {
+            case SAW -> remapLegacy(resource, LEGACY_SAW_TRAP_FOLDER, SAW_TRAP_SHEET);
+            case SPIKE -> remapLegacy(resource, LEGACY_SPIKE_TRAP_FOLDER, SPIKE_TRAP_SHEET);
+            case FIRE_VENT -> remapLegacy(resource, LEGACY_FIRE_TRAP_FOLDER, FIRE_TRAP_SHEET);
+        };
+    }
+
+    private String remapLegacy(String resource, String legacy, String replacement) {
+        if (resource == null || resource.isBlank()) {
+            return replacement;
+        }
+        String trimmed = resource.trim();
+        if (legacy != null && legacy.equalsIgnoreCase(trimmed)) {
+            return replacement;
+        }
+        return trimmed;
+    }
+
     private void configureTrapDefaults(RoomTrap trap, Random random) {
         if (trap == null) {
             return;
@@ -1619,13 +1651,13 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         Random rngLocal = random == null ? new Random() : random;
         switch (trap.kind) {
             case SAW -> {
-                trap.animationFolder = SAW_TRAP_FOLDER;
+                trap.animationFolder = SAW_TRAP_SHEET;
                 trap.frameDuration = 0.06;
                 trap.damageOverride = Math.max(trap.damageOverride, 1);
                 trap.contactCooldownOverride = 0.35;
             }
             case SPIKE -> {
-                trap.animationFolder = SPIKE_TRAP_FOLDER;
+                trap.animationFolder = SPIKE_TRAP_SHEET;
                 trap.frameDuration = 0.08;
                 trap.cycleSeconds = Math.max(1.2, 1.8 + rngLocal.nextDouble() * 1.6);
                 trap.activeFraction = 0.45 + rngLocal.nextDouble() * 0.3;
@@ -1633,7 +1665,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 trap.contactCooldownOverride = 0.55;
             }
             case FIRE_VENT -> {
-                trap.animationFolder = FIRE_TRAP_FOLDER;
+                trap.animationFolder = FIRE_TRAP_SHEET;
                 trap.frameDuration = 0.07;
                 trap.burstEvery = Math.max(2.0, 3.0 + rngLocal.nextDouble() * 2.5);
                 trap.burstDuration = Math.max(0.6, 0.9 + rngLocal.nextDouble() * 0.8);
