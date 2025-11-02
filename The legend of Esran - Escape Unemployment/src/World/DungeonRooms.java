@@ -603,7 +603,7 @@ public class DungeonRooms extends JPanel implements KeyListener {
         this.difficulty = difficulty == null ? Difficulty.EASY : difficulty;
         int refresh = Math.max(30, this.settings.refreshRate());
         this.framePacer = new FramePacer(refresh, this::onFrame);
-        this.messageDurationTicks = Math.max(1, refresh * MESSAGE_SECONDS);
+        this.messageDurationTicks = Math.max(1, FPS * MESSAGE_SECONDS);
         this.renderSize = this.settings.resolution();
 
         setPreferredSize(new Dimension(renderSize));
@@ -3830,8 +3830,7 @@ public class DungeonRooms extends JPanel implements KeyListener {
     }
 
     private double tickSeconds() {
-        int refresh = settings == null ? FPS : Math.max(30, settings.refreshRate());
-        return 1.0 / refresh;
+        return 1.0 / FPS;
     }
 
     private void onFrame() {
@@ -6440,8 +6439,7 @@ public class DungeonRooms extends JPanel implements KeyListener {
 
         FramePacer(int refreshRate, Runnable tick) {
             this.tick = tick == null ? () -> { } : tick;
-            int clamped = Math.max(30, refreshRate);
-            this.frameNanos = 1_000_000_000L / clamped;
+            this.frameNanos = 1_000_000_000L / FPS;
         }
 
         synchronized void start() {
