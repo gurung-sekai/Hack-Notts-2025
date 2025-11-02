@@ -15,16 +15,13 @@ public final class SpriteLoader {
     private SpriteLoader() { }
 
     public static BufferedImage[] loadDefault(String classpathLocation) {
-        if (classpathLocation == null || classpathLocation.isBlank()) {
-            return new BufferedImage[]{placeholder(32, 32, Color.MAGENTA)};
-        }
-        if (isSpriteSheetPath(classpathLocation)) {
-            BufferedImage[] frames = loadSpriteSheet(classpathLocation);
-            if (frames.length > 0) {
-                return frames;
-            }
-        }
-        return loadSequential(classpathLocation, "frame_", 0, DEFAULT_MAX_FRAMES);
+        return loadFrames(classpathLocation);
+    }
+
+    public static LoadedSprite loadWithMask(String classpathLocation) {
+        BufferedImage[] frames = loadFrames(classpathLocation);
+        boolean[][] mask = buildMask(frames);
+        return new LoadedSprite(frames, mask);
     }
 
     public static BufferedImage[] loadSequential(String classpathDirectory,
@@ -56,6 +53,19 @@ public final class SpriteLoader {
             frames.add(placeholder(32, 32, hashColour(classpathDirectory)));
         }
         return frames.toArray(new BufferedImage[0]);
+    }
+
+    private static BufferedImage[] loadFrames(String classpathLocation) {
+        if (classpathLocation == null || classpathLocation.isBlank()) {
+            return new BufferedImage[]{placeholder(32, 32, Color.MAGENTA)};
+        }
+        if (isSpriteSheetPath(classpathLocation)) {
+            BufferedImage[] frames = loadSpriteSheet(classpathLocation);
+            if (frames.length > 0) {
+                return frames;
+            }
+        }
+        return loadSequential(classpathLocation, "frame_", 0, DEFAULT_MAX_FRAMES);
     }
 
     private static boolean isSpriteSheetPath(String input) {
@@ -189,5 +199,39 @@ public final class SpriteLoader {
         int g = 64 + Math.abs((hash / 31) % 128);
         int b = 64 + Math.abs((hash / 67) % 128);
         return new Color(r, g, b);
+    }
+
+    private static boolean[][] buildMask(BufferedImage[] frames) {
+        if (frames == null || frames.length == 0) {
+            return new boolean[0][0];
+        }
+        int width = Math.max(1, frames[0].getWidth());
+        int height = Math.max(1, frames[0].getHeight());
+        boolean[][] mask = new boolean[height][width];
+        for (BufferedImage frame : frames) {
+            if (frame == null) {
+                continue;
+            }
+            int fw = Math.min(width, frame.getWidth());
+            int fh = Math.min(height, frame.getHeight());
+            for (int y = 0; y < fh; y++) {
+                for (int x = 0; x < fw; x++) {
+                    int alpha = (frame.getRGB(x, y) >>> 24) & 0xFF;
+                    if (alpha > 0) {
+                        mask[y][x] = true;
+                    }
+                }
+            }
+        }
+        return mask;
+    }
+
+    public record LoadedSprite(BufferedImage[] frames, boolean[][] alphaMask) {
+        public LoadedSprite {
+            frames = frames == null || frames.length == 0
+                    ? new BufferedImage[]{placeholder(32, 32, Color.MAGENTA)}
+                    : frames;
+            alphaMask = alphaMask == null ? new boolean[0][0] : alphaMask;
+        }
     }
 }

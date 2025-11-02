@@ -16,6 +16,7 @@ import World.trap.SawTrap;
 import World.trap.SpikeTrap;
 import World.trap.SpriteLoader;
 import World.trap.Trap;
+import World.trap.TrapData;
 import World.trap.TrapManager;
 import World.gfx.CharacterSkinLibrary;
 import World.gfx.DungeonTextures;
@@ -278,7 +279,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
     }
 
-    static class RoomTrap implements Serializable {
+    static class RoomTrap implements Serializable, TrapData {
         @Serial
         private static final long serialVersionUID = 1L;
         TrapKind kind = TrapKind.SAW;
@@ -294,6 +295,59 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         double burstDuration = 1.0;
         int damageOverride = 0;
         double contactCooldownOverride = -1.0;
+        String id = "";
+        int visualWidth = TILE;
+        int visualHeight = TILE;
+        int visualOffsetX = 0;
+        int visualOffsetY = 0;
+        boolean pixelAccurate = false;
+        transient boolean[][] alphaMask;
+
+        @Override
+        public String id() {
+            if (id != null && !id.isBlank()) {
+                return id;
+            }
+            if (animationFolder != null && !animationFolder.isBlank()) {
+                return animationFolder;
+            }
+            return kind == null ? "trap" : kind.name().toLowerCase(Locale.ROOT);
+        }
+
+        @Override
+        public int logicWidth() {
+            return Math.max(1, width);
+        }
+
+        @Override
+        public int logicHeight() {
+            return Math.max(1, height);
+        }
+
+        @Override
+        public int visualWidth() {
+            return Math.max(1, visualWidth);
+        }
+
+        @Override
+        public int visualHeight() {
+            return Math.max(1, visualHeight);
+        }
+
+        @Override
+        public TrapData.Offset visualOffset() {
+            return new TrapData.Offset(visualOffsetX, visualOffsetY);
+        }
+
+        @Override
+        public boolean pixelAccurate() {
+            return pixelAccurate;
+        }
+
+        @Override
+        public boolean[][] alphaMask() {
+            return alphaMask;
+        }
     }
 
     private final class TrapAwarePlayer implements Player {
@@ -1575,7 +1629,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         }
         String folder = normaliseTrapResource(def);
         double frameDuration = def.frameDuration > 0 ? def.frameDuration : defaultFrameDuration(def.kind);
-        Animation animation = new Animation(SpriteLoader.loadDefault(folder), frameDuration);
+        SpriteLoader.LoadedSprite sprite = SpriteLoader.loadWithMask(folder);
+        Animation animation = new Animation(sprite.frames(), frameDuration);
         BaseTrap trap;
         switch (def.kind) {
             case SAW -> trap = new SawTrap(def.x, def.y, animation);
@@ -1586,15 +1641,24 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (trap == null) {
             return null;
         }
+        def.alphaMask = sprite.alphaMask();
+        if (def.visualWidth <= 0) {
+            def.visualWidth = animation.getWidth();
+        }
+        if (def.visualHeight <= 0) {
+            def.visualHeight = animation.getHeight();
+        }
         if (def.width > 0 || def.height > 0) {
             trap.setDimensions(def.width, def.height);
         }
+        trap.setVisualDimensions(def.visualWidth(), def.visualHeight(), def.visualOffsetX, def.visualOffsetY);
         if (def.damageOverride > 0) {
             trap.setDamage(def.damageOverride);
         }
         if (def.contactCooldownOverride >= 0.0) {
             trap.setContactCooldown(def.contactCooldownOverride);
         }
+        trap.setPixelAccuracy(def.pixelAccurate(), def.alphaMask());
         return trap;
     }
 
@@ -1655,6 +1719,15 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 trap.frameDuration = 0.06;
                 trap.damageOverride = Math.max(trap.damageOverride, 1);
                 trap.contactCooldownOverride = 0.35;
+                trap.pixelAccurate = true;
+                int visualWidth = TILE * 2;
+                trap.visualWidth = visualWidth;
+                trap.visualHeight = Math.max(TILE, trap.height);
+                trap.visualOffsetX = -(visualWidth - trap.width) / 2;
+                trap.visualOffsetY = -(trap.visualHeight - trap.height) / 2;
+                if (trap.id == null || trap.id.isBlank()) {
+                    trap.id = "saw_double";
+                }
             }
             case SPIKE -> {
                 trap.animationFolder = SPIKE_TRAP_SHEET;
@@ -1663,6 +1736,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 trap.activeFraction = 0.45 + rngLocal.nextDouble() * 0.3;
                 trap.damageOverride = Math.max(trap.damageOverride, 2);
                 trap.contactCooldownOverride = 0.55;
+                trap.pixelAccurate = true;
+                trap.visualWidth = Math.max(TILE, trap.width);
+                trap.visualHeight = TILE * 2;
+                trap.visualOffsetX = -(trap.visualWidth - trap.width) / 2;
+                trap.visualOffsetY = -TILE / 2;
+                if (trap.id == null || trap.id.isBlank()) {
+                    trap.id = "spike_small";
+                }
             }
             case FIRE_VENT -> {
                 trap.animationFolder = FIRE_TRAP_SHEET;

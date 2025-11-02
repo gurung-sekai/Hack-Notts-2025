@@ -594,6 +594,12 @@ public final class DungeonRoomsSnapshot implements Serializable {
             t.burstDuration = trap.burstDuration;
             t.damageOverride = trap.damageOverride;
             t.contactCooldownOverride = trap.contactCooldownOverride;
+            t.id = trap.id;
+            t.visualWidth = trap.visualWidth;
+            t.visualHeight = trap.visualHeight;
+            t.visualOffsetX = trap.visualOffsetX;
+            t.visualOffsetY = trap.visualOffsetY;
+            t.pixelAccurate = trap.pixelAccurate;
             list.add(t);
         }
         return list;
