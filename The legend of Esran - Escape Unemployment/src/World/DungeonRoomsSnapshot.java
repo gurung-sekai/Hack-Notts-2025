@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public final class DungeonRoomsSnapshot implements Serializable {
     @Serial
-    private static final long serialVersionUID = 5L;
+    private static final long serialVersionUID = 6L;
 
     private final Map<Point, DungeonRooms.Room> world;
     private final Map<Point, DungeonRooms.BossEncounter> bossEncounters;
@@ -487,6 +487,8 @@ public final class DungeonRoomsSnapshot implements Serializable {
             copy.rewardClaimed = original.rewardClaimed;
             copy.preludeShown = original.preludeShown;
             copy.requiredVitalityLevel = original.requiredVitalityLevel;
+            copy.storyEncounter = original.storyEncounter;
+            copy.storySequenceIndex = original.storySequenceIndex;
             result.put(new Point(entry.getKey()), copy);
         }
         return result;

@@ -34,7 +34,7 @@ import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
+import java.util.concurrent.locks.LockSupport;
 
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
@@ -55,8 +55,6 @@ import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.RoundRectangle2D;
 
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
@@ -88,7 +86,7 @@ import java.util.function.Supplier;
  * Top-down dungeon crawler panel with persistent rooms and procedural generation.
  * Player movement, combat, and interactions obey the control bindings supplied by {@link ControlsProfile}.
  */
-public class DungeonRooms extends JPanel implements ActionListener, KeyListener {
+public class DungeonRooms extends JPanel implements KeyListener {
 
     // ----- Tunables -----
     static final int TILE = 36;           // pixels per tile
@@ -239,12 +237,14 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     static class BossEncounter implements Serializable {
         @Serial
-        private static final long serialVersionUID = 3L;
+        private static final long serialVersionUID = 4L;
         BossBattlePanel.BossKind kind;
         boolean defeated = false;
         boolean rewardClaimed = false;
         boolean preludeShown = false;
         int requiredVitalityLevel = 0;
+        boolean storyEncounter = false;
+        int storySequenceIndex = -1;
     }
 
     static class Room implements Serializable {
@@ -500,7 +500,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private final Runnable exitHandler;
     private final BossBattleHost bossBattleHost;
 
-    private final Timer timer;
+    private final FramePacer framePacer;
     private final int messageDurationTicks;
 
     private Random rng = new Random();
@@ -601,8 +601,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         this.exitHandler = exitHandler == null ? () -> { } : exitHandler;
         this.bossBattleHost = bossBattleHost;
         this.difficulty = difficulty == null ? Difficulty.EASY : difficulty;
-        this.timer = new Timer(1000 / Math.max(30, this.settings.refreshRate()), this);
-        this.messageDurationTicks = Math.max(1, this.settings.refreshRate() * MESSAGE_SECONDS);
+        int refresh = Math.max(30, this.settings.refreshRate());
+        this.framePacer = new FramePacer(refresh, this::onFrame);
+        this.messageDurationTicks = Math.max(1, refresh * MESSAGE_SECONDS);
         this.renderSize = this.settings.resolution();
 
         setPreferredSize(new Dimension(renderSize));
@@ -631,7 +632,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             initializeNewRun();
         }
 
-        timer.start();
+        framePacer.start();
     }
 
     private void initializeNewRun() {
@@ -1977,17 +1978,18 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     private void pauseForOverlay(Runnable runnable) {
         boolean previousPaused = paused;
         boolean previousOverlay = overlayActive;
+        boolean resumeLoop = framePacer.isRunning();
         overlayActive = true;
         paused = true;
         clearMovementInput();
-        timer.stop();
+        framePacer.pause();
         try {
             runnable.run();
         } finally {
             overlayActive = previousOverlay;
             paused = previousPaused;
-            if (!timer.isRunning()) {
-                timer.start();
+            if (resumeLoop) {
+                framePacer.resume();
             }
             clearMovementInput(true);
             requestFocusInWindow();
@@ -3190,40 +3192,40 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
 
     private void ensureStoryBossHubAvailability() {
         ensureStoryHubDoor();
-        if (!isStoryHub(worldPos)) {
-            return;
-        }
-        Point bossPos = storyBossRoomPosition();
+        List<BossBattlePanel.BossKind> order = activeStoryOrder();
         if (bossEncounters == null) {
             bossEncounters = new HashMap<>();
         }
-        BossEncounter encounter = bossEncounters.get(bossPos);
-        if (encounter != null && !encounter.defeated) {
-            return;
-        }
-        BossBattlePanel.BossKind nextKind = nextStoryBossKind();
-        if (nextKind == null) {
-            bossEncounters.remove(bossPos);
-            return;
-        }
-        Room bossRoom = makeOrGetRoom(bossPos, opposite(STORY_HUB_BOSS_DIR));
-        if (bossRoom != null) {
-            bossRoom.lockedDoors.remove(opposite(STORY_HUB_BOSS_DIR));
+        for (int index = 0; index < order.size(); index++) {
+            BossBattlePanel.BossKind bossKind = order.get(index);
+            Point bossPos = storyBossPosition(index);
+            Dir entrance = index == 0 ? opposite(STORY_HUB_BOSS_DIR) : Dir.S;
+            Room bossRoom = makeOrGetRoom(bossPos, entrance);
             prepareBossRoom(bossRoom);
-            markRoomDirty(bossRoom);
+            configureStoryBossRoom(bossRoom, index, order.size());
+            BossEncounter encounter = bossEncounters.computeIfAbsent(new Point(bossPos), key -> new BossEncounter());
+            if (encounter.kind != bossKind) {
+                encounter.preludeShown = false;
+            }
+            encounter.kind = bossKind;
+            encounter.storyEncounter = true;
+            encounter.storySequenceIndex = index;
+            if (index < storyBossIndex) {
+                encounter.defeated = true;
+                encounter.rewardClaimed = true;
+            } else if (index == storyBossIndex) {
+                encounter.defeated = encounter.defeated && encounter.rewardClaimed;
+            } else {
+                encounter.defeated = false;
+                encounter.rewardClaimed = false;
+            }
+            encounter.requiredVitalityLevel = Math.min(MAX_VITALITY_UPGRADES, Math.max(0, index));
+            updateStoryDoorLocks(bossRoom, encounter, index, order.size());
+            if (bossPool != null) {
+                bossPool.remove(bossKind);
+            }
         }
-        if (encounter == null) {
-            encounter = new BossEncounter();
-        }
-        encounter.kind = nextKind;
-        encounter.defeated = false;
-        encounter.rewardClaimed = false;
-        encounter.preludeShown = false;
-        encounter.requiredVitalityLevel = Math.min(MAX_VITALITY_UPGRADES, Math.max(0, storyBossIndex));
-        bossEncounters.put(new Point(bossPos), encounter);
-        if (bossPool != null) {
-            bossPool.remove(nextKind);
-        }
+        pruneStoryEncountersBeyond(order.size());
     }
 
     private void ensureStoryHubDoor() {
@@ -3250,7 +3252,12 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private Point storyBossRoomPosition() {
-        return step(storyHubPosition(), STORY_HUB_BOSS_DIR);
+        List<BossBattlePanel.BossKind> order = activeStoryOrder();
+        if (order.isEmpty()) {
+            return storyBossPosition(0);
+        }
+        int index = Math.min(storyBossIndex, order.size() - 1);
+        return storyBossPosition(index);
     }
 
     private boolean isStoryHub(Point pos) {
@@ -3258,11 +3265,11 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     private boolean isStoryBossRoom(Point pos) {
-        if (pos == null) {
+        if (pos == null || bossEncounters == null) {
             return false;
         }
-        Point boss = storyBossRoomPosition();
-        return boss.equals(pos);
+        BossEncounter encounter = bossEncounters.get(pos);
+        return encounter != null && encounter.storyEncounter;
     }
 
     private BossBattlePanel.BossKind nextStoryBossKind() {
@@ -3290,18 +3297,28 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (targetRoom == null) return;
         targetRoom.enemies.clear();
         targetRoom.keyPickups.clear();
+        targetRoom.coinPickups.clear();
+        targetRoom.enemySpawns.clear();
+        targetRoom.trapSpawns.clear();
+        targetRoom.trapsPrepared = true;
+        targetRoom.trapManager = null;
         targetRoom.cleared = true;
     }
 
     private void grantBossReward(BossEncounter encounter) {
         if (encounter == null || encounter.rewardClaimed) return;
+        encounter.defeated = true;
         encounter.rewardClaimed = true;
-        keysHeld++;
         healPlayerTo(playerMaxHp());
         int rewardCoins = 25;
         coins += rewardCoins;
         String victory = texts.text("victory_heal", keysHeld, playerMaxHp());
-        showMessage(victory + "  +" + rewardCoins + " coins");
+        showMessage(victory + "  +" + rewardCoins + " coins. Key dropped!");
+        if (room != null) {
+            int dropX = player != null ? player.x + player.width / 2 : COLS * TILE / 2;
+            int dropY = player != null ? player.y + player.height / 2 : ROWS * TILE / 2;
+            spawnKeyPickup(room, dropX, dropY);
+        }
         bossesDefeated++;
         List<BossBattlePanel.BossKind> order = activeStoryOrder();
         int defeatedIndex = order.indexOf(encounter.kind);
@@ -3309,8 +3326,101 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             storyBossIndex = Math.max(storyBossIndex, defeatedIndex + 1);
         }
         ensureStoryHubDoor();
+        ensureStoryBossHubAvailability();
         checkpointRoom = new Point(worldPos);
         checkpointBoss = encounter.kind;
+    }
+
+    private Point storyBossPosition(int index) {
+        return new Point(0, -(index + 1));
+    }
+
+    private void configureStoryBossRoom(Room bossRoom, int index, int total) {
+        if (bossRoom == null) {
+            return;
+        }
+        if (bossRoom.doors == null) {
+            bossRoom.doors = EnumSet.noneOf(Dir.class);
+        } else {
+            bossRoom.doors.clear();
+        }
+        bossRoom.lockedDoors = EnumSet.noneOf(Dir.class);
+        bossRoom.shopDoor = null;
+        bossRoom.cleared = true;
+        EnumSet<Dir> desired = EnumSet.noneOf(Dir.class);
+        desired.add(Dir.S);
+        if (index + 1 < total) {
+            desired.add(Dir.N);
+        }
+        for (Dir dir : desired) {
+            bossRoom.doors.add(dir);
+            carveDoorOnGrid(bossRoom, dir);
+        }
+        for (Dir dir : Dir.values()) {
+            if (!desired.contains(dir)) {
+                sealDoor(bossRoom, dir);
+            }
+        }
+        markRoomDirty(bossRoom);
+    }
+
+    private void updateStoryDoorLocks(Room room, BossEncounter encounter, int index, int total) {
+        if (room == null) {
+            return;
+        }
+        if (room.lockedDoors == null) {
+            room.lockedDoors = EnumSet.noneOf(Dir.class);
+        }
+        room.lockedDoors.remove(Dir.S);
+        if (index + 1 < total) {
+            if (encounter != null && encounter.rewardClaimed) {
+                room.lockedDoors.remove(Dir.N);
+            } else {
+                room.lockedDoors.add(Dir.N);
+            }
+        } else {
+            room.lockedDoors.remove(Dir.N);
+        }
+    }
+
+    private void sealDoor(Room room, Dir dir) {
+        if (room == null || dir == null) {
+            return;
+        }
+        if (room.doors != null) {
+            room.doors.remove(dir);
+        }
+        if (room.lockedDoors != null) {
+            room.lockedDoors.remove(dir);
+        }
+        Point tile = doorTile(dir);
+        if (tile != null && inBounds(tile.x, tile.y)) {
+            room.g[tile.x][tile.y] = T.WALL;
+            Point inside = new Point(tile);
+            switch (dir) {
+                case N -> inside.y = Math.min(ROWS - 1, inside.y + 1);
+                case S -> inside.y = Math.max(0, inside.y - 1);
+                case W -> inside.x = Math.min(COLS - 1, inside.x + 1);
+                case E -> inside.x = Math.max(0, inside.x - 1);
+            }
+            if (inBounds(inside.x, inside.y)) {
+                room.g[inside.x][inside.y] = T.WALL;
+            }
+        }
+    }
+
+    private void pruneStoryEncountersBeyond(int total) {
+        if (bossEncounters == null || bossEncounters.isEmpty()) {
+            return;
+        }
+        Iterator<Map.Entry<Point, BossEncounter>> it = bossEncounters.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Point, BossEncounter> entry = it.next();
+            BossEncounter encounter = entry.getValue();
+            if (encounter != null && encounter.storyEncounter && encounter.storySequenceIndex >= total) {
+                it.remove();
+            }
+        }
     }
 
     private static String formatBossName(BossBattlePanel.BossKind kind) {
@@ -3444,7 +3554,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         if (encounter == null) return;
         playBossPrelude(encounter);
         inBoss = true;
-        timer.stop();
+        boolean resumeLoop = framePacer.isRunning();
+        framePacer.pause();
         BossBattlePanel.BattleTuning tuning = createBattleTuning(encounter);
         Consumer<Outcome> finish = outcome -> SwingUtilities.invokeLater(() -> {
             if (outcome == Outcome.HERO_WIN) {
@@ -3462,7 +3573,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             }
             inBoss = false;
             iFrames = 60; // grace on return
-            timer.start();
+            if (resumeLoop) {
+                framePacer.resume();
+            }
             clearMovementInput(true);
             requestFocusInWindow();
         });
@@ -3721,8 +3834,7 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
         return 1.0 / refresh;
     }
 
-    @Override
-    public void actionPerformed(ActionEvent e) {
+    private void onFrame() {
         if (paused || inBoss) {
             return;
         }
@@ -6218,7 +6330,8 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             return;
         }
         paused = true;
-        timer.stop();
+        boolean resumeLoop = framePacer.isRunning();
+        framePacer.pause();
         String[] options = {
                 texts.text("resume"),
                 texts.text("save_and_exit"),
@@ -6233,7 +6346,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
                 JOptionPane.showMessageDialog(this, "Unable to save: " + ex.getMessage(),
                         texts.text("pause_title"), JOptionPane.ERROR_MESSAGE);
                 paused = false;
-                timer.start();
+                if (resumeLoop) {
+                    framePacer.resume();
+                }
                 requestFocusInWindow();
                 return;
             }
@@ -6242,7 +6357,9 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
             exitHandler.run();
         } else {
             paused = false;
-            timer.start();
+            if (resumeLoop) {
+                framePacer.resume();
+            }
             requestFocusInWindow();
         }
     }
@@ -6311,7 +6428,89 @@ public class DungeonRooms extends JPanel implements ActionListener, KeyListener 
     }
 
     public void shutdown() {
-        timer.stop();
+        framePacer.stop();
+    }
+
+    private final class FramePacer implements Runnable {
+        private final Runnable tick;
+        private final long frameNanos;
+        private volatile boolean running;
+        private volatile boolean paused;
+        private Thread thread;
+
+        FramePacer(int refreshRate, Runnable tick) {
+            this.tick = tick == null ? () -> { } : tick;
+            int clamped = Math.max(30, refreshRate);
+            this.frameNanos = 1_000_000_000L / clamped;
+        }
+
+        synchronized void start() {
+            if (thread != null && thread.isAlive()) {
+                running = true;
+                paused = false;
+                LockSupport.unpark(thread);
+                return;
+            }
+            running = true;
+            paused = false;
+            thread = new Thread(this, "DungeonRoomsLoop");
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        synchronized void pause() {
+            if (!running) {
+                return;
+            }
+            paused = true;
+        }
+
+        synchronized void resume() {
+            if (thread == null || !thread.isAlive()) {
+                start();
+                return;
+            }
+            running = true;
+            paused = false;
+            LockSupport.unpark(thread);
+        }
+
+        synchronized void stop() {
+            running = false;
+            paused = true;
+            if (thread != null) {
+                LockSupport.unpark(thread);
+            }
+        }
+
+        synchronized boolean isRunning() {
+            return running && !paused && thread != null && thread.isAlive();
+        }
+
+        @Override
+        public void run() {
+            long nextTick = System.nanoTime();
+            while (true) {
+                if (!running) {
+                    break;
+                }
+                if (!paused) {
+                    SwingUtilities.invokeLater(tick);
+                    nextTick += frameNanos;
+                } else {
+                    nextTick = System.nanoTime() + frameNanos;
+                }
+                long sleep = nextTick - System.nanoTime();
+                if (sleep > 0) {
+                    LockSupport.parkNanos(sleep);
+                } else {
+                    nextTick = System.nanoTime();
+                }
+            }
+            synchronized (FramePacer.this) {
+                thread = null;
+            }
+        }
     }
 
     /**

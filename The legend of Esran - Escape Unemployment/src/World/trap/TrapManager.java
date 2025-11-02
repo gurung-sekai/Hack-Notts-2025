@@ -49,13 +49,25 @@ public final class TrapManager implements Serializable {
                 continue;
             }
             Rectangle trapBounds = trap.getBounds();
-            if (trapBounds == null || !playerBounds.intersects(trapBounds)) {
+            Rectangle visualBounds = null;
+            boolean intersects = trapBounds != null && playerBounds.intersects(trapBounds);
+            BaseTrap base = trap instanceof BaseTrap ? (BaseTrap) trap : null;
+            if (!intersects && base != null) {
+                visualBounds = base.getVisualBounds();
+                if (visualBounds != null && visualBounds.width > 0 && visualBounds.height > 0) {
+                    intersects = playerBounds.intersects(visualBounds);
+                }
+            }
+            if (!intersects) {
                 continue;
             }
-            if (trap instanceof BaseTrap base && base.isPixelAccurate()) {
+            if (base != null && base.isPixelAccurate()) {
+                if (visualBounds == null) {
+                    visualBounds = base.getVisualBounds();
+                }
                 // Only damage if player touches non-transparent pixels
                 // Do not derive hitbox from sprite scale or user settings
-                if (!pixelPerfectOverlap(base, playerBounds)) {
+                if (!pixelPerfectOverlap(base, playerBounds, visualBounds)) {
                     continue;
                 }
             }
@@ -92,11 +104,11 @@ public final class TrapManager implements Serializable {
         return hit;
     }
 
-    private boolean pixelPerfectOverlap(BaseTrap trap, Rectangle playerBounds) {
+    private boolean pixelPerfectOverlap(BaseTrap trap, Rectangle playerBounds, Rectangle visualBounds) {
         if (trap == null || playerBounds == null) {
             return false;
         }
-        Rectangle visual = trap.getVisualBounds();
+        Rectangle visual = visualBounds != null ? visualBounds : trap.getVisualBounds();
         if (visual.width <= 0 || visual.height <= 0) {
             return true;
         }

@@ -205,8 +205,18 @@ public final class SpriteLoader {
         if (frames == null || frames.length == 0) {
             return new boolean[0][0];
         }
-        int width = Math.max(1, frames[0].getWidth());
-        int height = Math.max(1, frames[0].getHeight());
+        int width = 0;
+        int height = 0;
+        for (BufferedImage frame : frames) {
+            if (frame == null) {
+                continue;
+            }
+            width = Math.max(width, frame.getWidth());
+            height = Math.max(height, frame.getHeight());
+        }
+        if (width <= 0 || height <= 0) {
+            return new boolean[0][0];
+        }
         boolean[][] mask = new boolean[height][width];
         for (BufferedImage frame : frames) {
             if (frame == null) {
