@@ -24,6 +24,12 @@ public abstract class BaseTrap implements Trap, Serializable {
 
     private final Animation animation;
     private final Rectangle bounds = new Rectangle();
+    private int renderWidth;
+    private int renderHeight;
+    private int renderOffsetX;
+    private int renderOffsetY;
+    private boolean pixelAccurate;
+    private transient boolean[][] alphaMask;
 
     protected BaseTrap(double x, double y, Animation animation) {
         this.x = x;
@@ -31,6 +37,8 @@ public abstract class BaseTrap implements Trap, Serializable {
         this.animation = animation;
         this.width = animation == null ? 32 : Math.max(1, animation.getWidth());
         this.height = animation == null ? 32 : Math.max(1, animation.getHeight());
+        this.renderWidth = this.width;
+        this.renderHeight = this.height;
         updateBounds();
     }
 
@@ -64,6 +72,22 @@ public abstract class BaseTrap implements Trap, Serializable {
         updateBounds();
     }
 
+    public void setVisualDimensions(int width, int height, int offsetX, int offsetY) {
+        if (width > 0) {
+            this.renderWidth = width;
+        }
+        if (height > 0) {
+            this.renderHeight = height;
+        }
+        this.renderOffsetX = offsetX;
+        this.renderOffsetY = offsetY;
+    }
+
+    public void setPixelAccuracy(boolean enabled, boolean[][] mask) {
+        this.pixelAccurate = enabled && mask != null && mask.length > 0;
+        this.alphaMask = this.pixelAccurate ? mask : null;
+    }
+
     protected void updateBounds() {
         bounds.setBounds((int) Math.round(x), (int) Math.round(y), width, height);
     }
@@ -92,7 +116,9 @@ public abstract class BaseTrap implements Trap, Serializable {
         if (animation != null) {
             BufferedImage frame = animation.getFrame();
             if (frame != null) {
-                g.drawImage(frame, bounds.x, bounds.y, width, height, null);
+                int drawX = bounds.x + renderOffsetX;
+                int drawY = bounds.y + renderOffsetY;
+                g.drawImage(frame, drawX, drawY, renderWidth, renderHeight, null);
                 if (oldComposite != null) {
                     g.setComposite(oldComposite);
                 }
@@ -113,6 +139,18 @@ public abstract class BaseTrap implements Trap, Serializable {
     @Override
     public boolean isActive() {
         return active;
+    }
+
+    public boolean isPixelAccurate() {
+        return pixelAccurate && alphaMask != null && alphaMask.length > 0;
+    }
+
+    public Rectangle getVisualBounds() {
+        return new Rectangle(bounds.x + renderOffsetX, bounds.y + renderOffsetY, renderWidth, renderHeight);
+    }
+
+    public boolean[][] getAlphaMask() {
+        return alphaMask;
     }
 
     @Override
