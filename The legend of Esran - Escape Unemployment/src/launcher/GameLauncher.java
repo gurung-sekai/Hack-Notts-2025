@@ -79,6 +79,7 @@ public final class GameLauncher {
     private static final String CARD_MENU = "menu";
     private static final String CARD_GAME = "game";
     private static final String CARD_BOSS = "boss";
+    private static final KeyStroke ESCAPE_KEYSTROKE = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0);
 
     private static final LocaleOption[] LANGUAGES = {
             new LocaleOption("English", Locale.UK),
@@ -180,9 +181,7 @@ public final class GameLauncher {
             enableFullScreen();
         }
 
-        frame.getRootPane().registerKeyboardAction(e -> closeLauncher(),
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
-                JComponent.WHEN_IN_FOCUSED_WINDOW);
+        enableEscapeToClose();
 
         showMenuCard();
 
@@ -320,6 +319,8 @@ public final class GameLauncher {
     private void launchGame(Optional<DungeonRoomsSnapshot> snapshot) {
         stopMenuAnimation();
         stopTitleMusic();
+
+        disableEscapeToClose();
 
         GameSettings launchSettings = new GameSettings(settings);
         ControlsProfile controlsCopy = launchSettings.controls();
@@ -476,6 +477,7 @@ public final class GameLauncher {
     }
 
     private void showMenuCard() {
+        enableEscapeToClose();
         if (resumeButton != null) {
             resumeButton.setEnabled(saveManager.hasSave());
         }
@@ -503,8 +505,26 @@ public final class GameLauncher {
             if (musicPlayer != null) {
                 musicPlayer.close();
             }
+            disableEscapeToClose();
             frame.dispose();
         }
+    }
+
+    private void enableEscapeToClose() {
+        if (frame == null) {
+            return;
+        }
+        disableEscapeToClose();
+        frame.getRootPane().registerKeyboardAction(e -> closeLauncher(),
+                ESCAPE_KEYSTROKE,
+                JComponent.WHEN_IN_FOCUSED_WINDOW);
+    }
+
+    private void disableEscapeToClose() {
+        if (frame == null) {
+            return;
+        }
+        frame.getRootPane().unregisterKeyboardAction(ESCAPE_KEYSTROKE);
     }
 
     private void startMenuAnimation() {
